@@ -1,0 +1,39 @@
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: crm-internal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm_internal
+      POSTGRES_USER: crm_local
+      POSTGRES_PASSWORD: crm_pass
+      TZ: Asia/Jakarta
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - crm_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm_local -d crm_internal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: crm-internal-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - crm_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  crm_postgres_data:
+  crm_redis_data:
