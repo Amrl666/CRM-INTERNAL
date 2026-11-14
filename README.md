@@ -1,58 +1,244 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# B2B Outreach CRM
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Platform internal untuk mengelola prospek B2B: import & validasi data, segmentasi, consent/suppression, komunikasi email (Gmail API) dan WhatsApp (Evolution API + Baileys), sales pipeline, follow-up otomatis, dan analytics.
 
-## About Laravel
+Sistem ini dirancang sebagai **modular monolith** — satu aplikasi Laravel yang tetap memungkinkan menjadi SaaS di masa depan.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Ringkasan Fitur
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| Modul | Status | Keterangan |
+|-------|--------|------------|
+| Authentication & RBAC | ✅ Selesai | Login, logout, reset password, role-based access |
+| User Management | ✅ Selesai | CRUD user, assign role |
+| Companies & Contacts | ✅ Selesai | CRUD perusahaan dan kontak dengan normalisasi telepon E.164 |
+| Lead Management | ✅ Selesai | CRUD lead, transisi status, assignment, timeline aktivitas |
+| Import CSV/XLSX | ✅ Selesai | Upload, validasi, deduplikasi, preview, hasil per baris |
+| Consent & Suppression | ✅ Selesai | Append-only consent records, suppression list global |
+| Communication Eligibility | ✅ Selesai | Gate default-deny sebelum setiap komunikasi |
+| Email (Gmail API) | ✅ Selesai inti | OAuth connect, draft email, approval workflow |
+| WhatsApp (Evolution API) | ✅ Selesai inti | Webhook inbound, draft pesan, mode manual outbound |
+| Campaigns | ✅ Selesai inti | Buat campaign, approval, generate draft |
+| Sales Pipeline & Deals | ✅ Selesai inti | Pipeline stages, board deals, stage history |
+| Tasks | ✅ Selesai inti | CRUD task, due date, overdue detection |
+| Analytics | ✅ Selesai inti | Dashboard ringkasan lead/deal/aktivitas |
+| Automation Engine | ⏳ T7 | Rule-based automation (belum dimulai) |
+| Analytics Full | ⏳ T8 | KPI lengkap, export CSV/PDF (versi inti selesai) |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Stack Teknologi
 
-## Learning Laravel
+| Layer | Teknologi | Versi |
+|-------|-----------|-------|
+| Backend | PHP + Laravel | 8.3.x / ^13.0 |
+| Frontend | Livewire + Blade + Alpine.js | 4.4.8 |
+| CSS | Tailwind CSS | ^4.0.0 |
+| Database | PostgreSQL | 16.x |
+| Cache/Queue | Redis | 7.x |
+| Testing | Pest + PHPUnit | 4.7 / ^12.5 |
+| E2E | Playwright | ^1.65.1 |
+| Static Analysis | PHPStan + Larastan | latest |
+| Formatter | Laravel Pint | ^1.27 |
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### Dependencies Utama
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+- `spatie/laravel-permission` — RBAC
+- `google/apiclient` — Gmail API
+- `openspout/openspout` — Import XLSX/CSV hemat memori
+- `giggsey/libphonenumber-for-php` — Normalisasi nomor telepon ke E.164
+- `predis/predis` — Redis client (PHP lokal)
+- `pestphp/pest` — Test framework
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## Arsitektur
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+app/
+├── Domain/
+│   ├── Identity/          → Auth, User, Role, Permission
+│   ├── Companies/         → Company model
+│   ├── Contacts/          → Contact model
+│   ├── Leads/             → Lead, Activity, ImportBatch, ImportRow
+│   ├── Consent/           → ConsentRecord, SuppressionEntry, Eligibility gate
+│   ├── Campaigns/         → Campaign, EmailTemplate, CampaignRecipient
+│   ├── Communications/    → GmailProvider, EvolutionClient, Message service
+│   ├── Deals/             → Deal, Pipeline, PipelineStage
+│   ├── Tasks/             → Task model
+│   └── Audit/             → AuditLog
+├── Http/
+│   ├── Controllers/       → Gmail OAuth, Evolution webhook
+│   ├── Middleware/        → AuthenticateWithRoles
+│   └── Livewire/          → Semua halaman UI
+└── Jobs/                  → Async jobs (import, campaign, webhook)
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Prinsip Keamanan
 
-## Contributing
+1. **Consent default-deny** — Komunikasi tidak bisa dikirim tanpa izin yang valid
+2. **Draft-first email** — Semua email lewat draft + review manusia
+3. **WhatsApp manual** — Outbound mode tetap `manual`, tidak ada blast otomatis
+4. **Append-only consent** — Riwayat consent tidak bisa dihapus/diubah (database trigger)
+5. **Global suppression** — Opt-out berlaku universal, bukan per campaign
+6. **Webhook idempoten** — Duplicate webhook diproses sekali via `provider_events`
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Setup Lokal
 
-## Code of Conduct
+### Requirements
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- PHP 8.3+
+- Composer 2.x
+- Node.js 22.x
+- PostgreSQL 16+
+- Redis 7+
 
-## Security Vulnerabilities
+### Instalasi
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```bash
+# Clone repository
+git clone https://github.com/Amrl666/CRM-INTERNAL.git
+cd crm-internal
+
+# Install dependencies
+composer install
+npm install
+
+# Copy environment file
+cp .env.example .env
+php artisan key:generate
+
+# Jalankan database lokal (PostgreSQL + Redis via Docker)
+docker compose up -d
+
+# Run migrations & seeders
+php artisan migrate --seed
+
+# Build frontend
+npm run build
+
+# Jalankan development server
+npm run dev
+```
+
+Akses aplikasi di `http://localhost:8000`.
+
+### Default Users (seeding)
+
+| Email | Password | Role |
+|-------|----------|------|
+| admin@example.com | password | admin |
+| manager@e2e.test | password | sales_manager |
+| agent@e2e.test | password | sales_agent |
+| viewer@e2e.test | password | viewer |
+
+## Testing
+
+```bash
+# Jalankan semua test
+php artisan test
+
+# Format code
+php vendor/bin/pint
+
+# Static analysis
+php vendor/bin/phpstan analyse
+
+# E2E test
+npx playwright test
+```
+
+## Environment Configuration
+
+Lihat `.env.example` untuk daftar lengkap variabel. Yang perlu dikonfigurasi:
+
+```env
+# Database
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5433
+DB_DATABASE=crm_internal
+DB_USERNAME=crm_local
+DB_PASSWORD=crm_pass
+
+# Redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PREFIX=crm_internal_local_
+
+# Email (optional - default fake)
+EMAIL_PROVIDER=fake          # gmail | fake
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://localhost/integrations/google/callback
+
+# WhatsApp (optional - default fake)
+WHATSAPP_PROVIDER=fake       # evolution | fake
+WHATSAPP_OUTBOUND_MODE=manual
+EVOLUTION_API_URL=
+EVOLUTION_API_KEY=
+```
+
+Untuk testing: gunakan `EMAIL_PROVIDER=fake` dan `WHATSAPP_PROVIDER=fake`.
+
+## Struktur Database
+
+Tabel utama:
+- `users` — Akun pengguna
+- `companies` — Perusahaan/prospek
+- `contacts` — Kontak person
+- `leads` — Prospek aktif dengan status lifecycle
+- `consent_records` — Riwayat consent (append-only)
+- `suppression_entries` — List suppression global
+- `campaigns` — Kampanye komunikasi
+- `campaign_recipients` — Target per kampanye
+- `communication_messages` — Riwayat pesan (email & WhatsApp)
+- `deals` — Peluang penjualan
+- `pipelines`, `pipeline_stages` — Konfigurasi pipeline
+- `tasks` — Tugas sales
+- `activities` — Timeline aktivitas
+- `audit_logs` — Riwayat perubahan sistem
+
+Migration lengkap tersedia di `database/migrations/`.
+
+## API Endpoints
+
+API prefix: `/api/v1`
+
+| Method | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| POST | `/auth/login` | Login |
+| GET | `/leads` | Daftar leads |
+| POST | `/leads/import` | Import CSV/XLSX |
+| POST | `/integrations/google/callback` | OAuth callback Gmail |
+| POST | `/api/v1/webhooks/evolution` | Webhook masuk WhatsApp |
+| GET | `/dashboard` | Overview metrics |
+
+Full endpoint list lihat `Agent.md` §8.
+
+## Roadmap Implementasi
+
+| Tahap | Nama | Status |
+|-------|------|--------|
+| T0 | Fondasi proyek | ✅ Selesai |
+| T1 | Companies, Contacts, Leads, Import | ✅ Selesai |
+| T2 | Consent, Suppression, Eligibility | ✅ Selesai |
+| T3 | Email (Gmail, draft-first) | ✅ Selesai inti |
+| T4 | WhatsApp (Evolution, inbound + manual) | ✅ Selesai inti |
+| T5 | Campaign (email approval flow) | ✅ Selesai inti |
+| T6 | Sales Pipeline, Deals, Tasks | ✅ Selesai inti |
+| T7 | Automation Engine | ⏳ Ditunda |
+| T8 | Analytics & Reporting | ✅ Selesai inti |
+| T9 | Hardening & Deploy Readiness | 🔄 Berjalan |
+| T10 | Proposal Outreach Campaign | ⏳ Ditunda |
+
+## Deployment
+
+Target server: **LAB-01** (Ubuntu 24.04, PostgreSQL 16, Redis 7, Nginx + PHP-FPM).
+
+Deploy dilakukan secara manual bertahap dari tag Git. See `Agent.md` §20 untuk runbook lengkap.
+
+## Dokumentasi
+
+- `Agent.md` — Dokumentasi teknis lengkap (target arsitektur, spesifikasi modul, keamanan)
+- `docs/design/DESIGN.md` — Design system tokens & komponen
+- `docs/decisions/STATUS.md` — Status implementasi terkini
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT
