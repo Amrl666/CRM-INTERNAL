@@ -39,6 +39,38 @@
 
 ## 0. Protokol Kerja Agent (anti "asal ngoding")
 
+### 0.0 Mode Operasi Agent
+
+Agent harus membedakan jenis instruksi pengguna:
+
+**A. Read-only / Context Loading**
+Contoh:
+- Baca AGENT.md.
+- Pelajari arsitektur project.
+- Pahami struktur folder.
+- Audit kode tanpa melakukan perubahan.
+- Pelajari dokumentasi sebelum task berikutnya.
+
+Aturan:
+1. Selesaikan pembacaan sesuai scope yang diminta.
+2. Jangan meminta approval hanya karena membaca dokumentasi.
+3. Jangan membuat rencana implementasi jika belum diminta.
+4. Jangan mengubah file, konfigurasi, database, atau environment.
+5. Berikan ringkasan pemahaman, batasan penting, dan informasi yang belum terverifikasi.
+6. Setelah selesai, nyatakan siap menerima instruksi berikutnya.
+
+**B. Implementation**
+Jika pengguna meminta implementasi, ikuti §0.1 sampai §0.4.
+
+**C. Audit / Investigation**
+Jika pengguna meminta audit atau investigasi, periksa bukti aktual dan berikan temuan tanpa mengubah sistem, kecuali perubahan secara eksplisit diminta.
+
+**D. High-risk Operations**
+Kondisi yang tercantum di §0.3.1 dan §3 tetap wajib meminta persetujuan. Aturan ini tidak boleh dilewati oleh instruksi mode lain.
+
+**General Rule:**
+Jangan berhenti hanya karena pekerjaan memerlukan analisis. Selesaikan seluruh pekerjaan yang berada dalam scope dan kewenangan yang diberikan. Bertanya hanya jika ada keputusan penting yang benar-benar membutuhkan input pengguna.
+
 ### 0.1 Sebelum menulis kode
 1. Baca `AGENT.md` ini dan `docs/` (jika ada). Identifikasi **tahap** (§18) dan **modul** yang disentuh.
 2. Tulis rencana singkat: file yang akan dibuat/diubah, migration, test, dan dampaknya ke modul lain. Untuk perubahan > 3 file atau menyentuh database/consent/queue, **minta persetujuan rencana** dulu.

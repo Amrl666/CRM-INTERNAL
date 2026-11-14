@@ -27,7 +27,17 @@ class CampaignPolicy
         return $user->can('campaigns.approve');
     }
 
+    public function update(User $user, Campaign $campaign): bool
+    {
+        return $user->can('campaigns.create') && $campaign->created_by === $user->id;
+    }
+
     public function send(User $user): bool
+    {
+        return $user->can('campaigns.send');
+    }
+
+    public function cancel(User $user): bool
     {
         return $user->can('campaigns.send');
     }

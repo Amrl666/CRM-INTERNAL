@@ -2,11 +2,20 @@
 
 namespace App\Providers;
 
+use App\Domain\Campaigns\Contracts\ProposalPdfRenderer;
+use App\Domain\Campaigns\Services\FakePdfRenderer;
+use App\Domain\Campaigns\Services\PlaywrightPdfRenderer;
 use App\Domain\Communications\Contracts\EmailProvider;
+use App\Domain\Communications\Contracts\ProposalEmailSender;
+use App\Domain\Communications\Contracts\ProposalWhatsAppSender;
 use App\Domain\Communications\Contracts\WhatsAppProvider;
 use App\Domain\Communications\Fakes\FakeEmailProvider;
+use App\Domain\Communications\Fakes\FakeProposalEmailSender;
+use App\Domain\Communications\Fakes\FakeProposalWhatsAppSender;
 use App\Domain\Communications\Fakes\FakeWhatsAppProvider;
 use App\Domain\Communications\Providers\EvolutionClient;
+use App\Domain\Communications\Providers\EvolutionProposalSender;
+use App\Domain\Communications\Providers\GmailProposalSender;
 use App\Domain\Communications\Providers\GmailProvider;
 use App\Domain\Communications\Services\CommunicationManager;
 use App\Domain\Communications\Services\OutboundModeGuard;
@@ -44,6 +53,28 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->bind(CommunicationManager::class);
+
+        $this->app->bind(ProposalPdfRenderer::class, function () {
+            return match (config('proposals.pdf_renderer')) {
+                'fake' => new FakePdfRenderer,
+                'playwright' => new PlaywrightPdfRenderer,
+                default => throw new \RuntimeException(
+                    'Renderer PDF proposal ['.config('proposals.pdf_renderer').'] tidak dikenal.'
+                ),
+            };
+        });
+
+        $this->app->singleton(ProposalEmailSender::class, function () {
+            return config('communications.email.default') === 'gmail'
+                ? new GmailProposalSender($this->app->make(Client::class))
+                : new FakeProposalEmailSender;
+        });
+
+        $this->app->singleton(ProposalWhatsAppSender::class, function () {
+            return config('communications.whatsapp.default') === 'evolution'
+                ? new EvolutionProposalSender
+                : new FakeProposalWhatsAppSender;
+        });
     }
 
     public function boot(): void

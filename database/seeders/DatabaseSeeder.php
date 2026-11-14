@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
             RoleAndPermissionSeeder::class,
             PipelineSeeder::class,
             TemplateSeeder::class,
+            ProposalSeeder::class,
         ]);
     }
 }

@@ -25,6 +25,17 @@
         'OPEN' => ['bg-blue-50', 'text-blue-700'],
         'COMPLETED' => ['bg-slate-100', 'text-slate-600'],
         'CANCELLED' => ['bg-slate-100', 'text-slate-500'],
+        'REVIEW' => ['bg-amber-50', 'text-amber-700'],
+        'SCHEDULED' => ['bg-purple-50', 'text-purple-700'],
+        'RUNNING' => ['bg-blue-100', 'text-blue-800'],
+        'PAUSED' => ['bg-amber-100', 'text-amber-800'],
+        'GENERATING' => ['bg-blue-50', 'text-blue-700'],
+        'READY' => ['bg-green-50', 'text-green-700'],
+        'PROCESSING' => ['bg-blue-50', 'text-blue-700'],
+        'ACCEPTED' => ['bg-green-100', 'text-green-800'],
+        'DELIVERED' => ['bg-green-100', 'text-green-800'],
+        'ELIGIBLE' => ['bg-green-50', 'text-green-700'],
+        'INELIGIBLE' => ['bg-red-50', 'text-red-700'],
     ];
 
     $pair = $mapping[strtoupper($status)] ?? ['bg-slate-100', 'text-slate-600'];

@@ -70,6 +70,16 @@ Route::middleware(['auth'])->group(function () {
             ->name('create');
         Route::get('/{campaign}', App\Livewire\Campaigns\Show::class)->name('show');
     });
+
+    Route::prefix('proposals')->name('proposals.')->group(function () {
+        Route::get('/', App\Livewire\Proposals\Index::class)
+            ->middleware('can:viewAny,App\Domain\Campaigns\Models\Campaign')
+            ->name('index');
+        Route::get('/create', App\Livewire\Proposals\Form::class)
+            ->middleware('can:create,App\Domain\Campaigns\Models\Campaign')
+            ->name('create');
+        Route::get('/{campaign}', App\Livewire\Proposals\Show::class)->name('show');
+    });
     Route::get('/analytics/overview', Overview::class)
         ->middleware('can:viewAny,App\Domain\Deals\Models\Deal')
         ->name('analytics.overview');

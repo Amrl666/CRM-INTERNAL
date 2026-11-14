@@ -15,7 +15,7 @@ it('shows the dashboard to authenticated users', function () {
     $this->actingAs($user)
         ->get('/dashboard')
         ->assertOk()
-        ->assertSee('Dasbor');
+        ->assertSee('Dashboard');
 });
 
 it('logs out authenticated users', function () {

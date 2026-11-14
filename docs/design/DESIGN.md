@@ -1,4 +1,4 @@
-# DESIGN.md — Sistem Desain B2B Outreach CRM (v1)
+# DESIGN.md — Sistem Desain Prospectra (v1)
 
 Sumber kebenaran visual. Semua halaman wajib mengikuti token dan pola di sini.
 Perubahan token harus konsisten di seluruh UI dan diperbarui lewat PR.

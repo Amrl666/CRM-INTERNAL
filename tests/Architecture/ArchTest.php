@@ -1,7 +1,5 @@
 <?php
 
-use Illuminate\Support\Facades\File;
-
 arch('domain layer does not depend on Livewire')
     ->expect('App\Domain')
     ->not->toUse('Livewire');
@@ -11,8 +9,10 @@ arch('communication contracts are interfaces')
     ->toBeInterfaces();
 
 it('leaves no debugging functions in application code', function () {
-    foreach (File::allFiles(app_path()) as $file) {
-        expect($file->getContents())
-            ->not->toMatch('/\b(dd|dump|var_dump|print_r)\s*\(/');
+    $root = dirname(__DIR__, 2);
+    $files = glob($root.'/app/**/*.php', GLOB_BRACE) ?? [];
+    foreach ($files as $path) {
+        $contents = file_get_contents((string) $path);
+        expect($contents)->not->toMatch('/\b(dd|dump|var_dump|print_r)\s*\(/');
     }
 });

@@ -10,7 +10,7 @@ uses(RefreshDatabase::class);
 it('renders the login page', function () {
     $this->get('/login')
         ->assertOk()
-        ->assertSee('Masuk ke sistem');
+        ->assertSee('Login');
 });
 
 it('authenticates an active user and redirects to dashboard', function () {

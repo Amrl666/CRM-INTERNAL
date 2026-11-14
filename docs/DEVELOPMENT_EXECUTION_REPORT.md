@@ -4,7 +4,7 @@ Last verified: 2026-11-14
 
 ## Summary
 
-B2B Outreach CRM berjalan lokal di Laravel 13.42.0 / Livewire 4 / PostgreSQL 16 (Docker, port 5433) / Redis 7 (predis). Fondasi (T0) dan modul inti T1–T6 + T8 telah diimplementasi dan diverifikasi dengan **42 test lulus** dan Pint clean. Tidak ada push GitHub, deploy, perubahan DNS, atau pengiriman email/WhatsApp nyata. Production readiness tidak diklaim.
+Prospectra berjalan lokal di Laravel 13.42.0 / Livewire 4 / PostgreSQL 16 (Docker, port 5433) / Redis 7 (predis). Fondasi (T0) dan modul inti T1–T6 + T8 telah diimplementasi dan diverifikasi dengan **42 test lulus** dan Pint clean. Tidak ada push GitHub, deploy, perubahan DNS, atau pengiriman email/WhatsApp nyata. Production readiness tidak diklaim.
 
 ## Environment
 

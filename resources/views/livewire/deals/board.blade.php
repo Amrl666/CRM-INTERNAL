@@ -18,9 +18,9 @@
             Belum ada pipeline. Jalankan <code class="bg-slate-100 px-1">php artisan db:seed</code>.
         </div>
     @else
-        <div class="flex gap-4 overflow-x-auto pb-4">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             @foreach ($stages as $stage)
-                <div class="w-64 shrink-0 bg-slate-50 border border-slate-200 rounded-lg p-3" wire:key="stage-{{ $stage->id }}">
+                <div class="bg-slate-50 border border-slate-200 rounded-lg p-3" wire:key="stage-{{ $stage->id }}">
                     <div class="flex items-center justify-between text-sm font-medium text-slate-700">
                         <span>{{ $stage->name }}</span>
                         <span class="text-xs text-slate-500">{{ ($deals[$stage->id] ?? collect())->count() }}</span>
