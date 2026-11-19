@@ -2,69 +2,184 @@
 
 namespace App\Domain\Campaigns\Services;
 
+use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Models\Campaign;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use DateTimeZone;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
+use Throwable;
 
 final class BusinessSchedule
 {
     /**
-     * @param  array<int, string>  $recipientIds  ordered recipient IDs
-     * @return array<string, CarbonImmutable> recipient id => UTC timestamp
+     * @param  array<int, string>  $recipientIds
+     * @return array<string, CarbonImmutable>
      */
-    public function plan(Campaign $campaign, array $recipientIds, ?CarbonInterface $from = null): array
-    {
-        $timezone = (string) ($campaign->timezone ?: config('proposals.defaults.timezone', 'Asia/Jakarta'));
-        $rawDays = $campaign->business_days;
-        $days = array_map('intval', is_array($rawDays) ? $rawDays : [1, 2, 3, 4, 5]);
-        $excluded = array_flip(is_array($campaign->excluded_dates) ? $campaign->excluded_dates : []);
+    public function plan(
+        Campaign $campaign,
+        array $recipientIds,
+        ?CarbonInterface $from = null,
+    ): array {
+        $timezone = (string) (
+            $campaign->timezone
+            ?: config('proposals.defaults.timezone', 'Asia/Jakarta')
+        );
 
-        if ($days === []) {
-            throw new \RuntimeException('Jadwal bisnis harus memiliki minimal satu hari aktif.');
+        try {
+            new DateTimeZone($timezone);
+        } catch (Throwable) {
+            throw new RuntimeException("Timezone campaign tidak valid: {$timezone}");
         }
 
-        $rateLimit = max(1, (int) $campaign->rate_limit_per_hour);
-        $spacing = max(0, (int) $campaign->min_spacing_seconds);
-        $perHour = max(1, (int) floor(3600 / max(1, $rateLimit === 0 ? 1 : $rateLimit)));
-        $spacing = max($spacing, $perHour);
+        $rawDays = $campaign->business_days;
+        $days = array_values(array_unique(array_map(
+            'intval',
+            is_array($rawDays) ? $rawDays : [1, 2, 3, 4, 5],
+        )));
+
+        sort($days);
+
+        if ($days === [] || array_diff($days, [1, 2, 3, 4, 5, 6, 7]) !== []) {
+            throw new RuntimeException(
+                'Hari aktif harus berisi minimal satu hari valid (1-7).'
+            );
+        }
+
+        $excludedDates = is_array($campaign->excluded_dates)
+            ? $campaign->excluded_dates
+            : [];
+
+        $excluded = [];
+
+        foreach ($excludedDates as $date) {
+            if (
+                ! is_string($date)
+                || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                || ! $this->isValidDate($date)
+            ) {
+                throw new RuntimeException(
+                    'Tanggal pengecualian harus menggunakan format YYYY-MM-DD yang valid.'
+                );
+            }
+
+            $excluded[$date] = true;
+        }
+
+        $rateLimit = (int) $campaign->rate_limit_per_hour;
+        $userSpacing = (int) $campaign->min_spacing_seconds;
+
+        if ($rateLimit < 1 || $rateLimit > 120) {
+            throw new RuntimeException('Rate limit harus berada pada rentang 1-120 per jam.');
+        }
+
+        if ($userSpacing < 0 || $userSpacing > 3600) {
+            throw new RuntimeException('Jarak minimum pengiriman tidak valid.');
+        }
+
+        $startTime = $this->normalizeTime(
+            (string) ($campaign->business_start ?: '09:00')
+        );
+
+        $endTime = $this->normalizeTime(
+            (string) ($campaign->business_end ?: '17:00')
+        );
+
+        if ($endTime <= $startTime) {
+            throw new RuntimeException(
+                'Jam selesai operasional harus lebih besar dari jam mulai.'
+            );
+        }
+
+        // Enforce both user-defined spacing and hourly rate limit.
+        $minimumRateSpacing = max(1, (int) floor(3600 / $rateLimit));
+        $spacing = max($userSpacing, $minimumRateSpacing);
 
         $start = $from !== null
-            ? CarbonImmutable::instance($from)
+            ? CarbonImmutable::instance($from)->setTimezone($timezone)
             : CarbonImmutable::now($timezone);
 
         if ($campaign->scheduled_start_at !== null) {
-            $configuredStart = CarbonImmutable::instance($campaign->scheduled_start_at)->setTimezone($timezone);
+            $configuredStart = CarbonImmutable::instance(
+                $campaign->scheduled_start_at
+            )->setTimezone($timezone);
+
             if ($configuredStart->greaterThan($start)) {
                 $start = $configuredStart;
             }
         }
 
-        $startTime = $this->time((string) ($campaign->business_start ?: '09:00'));
-        $endTime = $this->time((string) ($campaign->business_end ?: '17:00'));
+        $events = $this->existingEvents(
+            $campaign,
+            $recipientIds,
+            $start,
+            $spacing,
+            $timezone,
+        );
 
-        $cursor = $this->nextOpening($start, $timezone, $days, $excluded, $startTime, $endTime);
-        $last = null;
+        $cursor = $this->nextOpening(
+            $start,
+            $timezone,
+            $days,
+            $excluded,
+            $startTime,
+            $endTime,
+        );
+
         $hourlyCounts = [];
+
+        foreach ($events as $event) {
+            $hourKey = $event->format('Y-m-d H');
+            $hourlyCounts[$hourKey] = ($hourlyCounts[$hourKey] ?? 0) + 1;
+        }
+
         $plan = [];
 
         foreach ($recipientIds as $id) {
-            $candidate = $cursor;
+            $attempts = 0;
 
-            for ($attempt = 0; $attempt < 2000; $attempt++) {
-                $candidate = $this->nextOpening($candidate, $timezone, $days, $excluded, $startTime, $endTime);
+            while (true) {
+                if (++$attempts > 10000) {
+                    throw new RuntimeException(
+                        'Gagal menemukan slot jadwal dalam batas pencarian.'
+                    );
+                }
 
-                if ($last !== null && $spacing > 0) {
-                    $minimum = $last->addSeconds($spacing);
-                    if ($candidate->lessThan($minimum)) {
-                        $candidate = $minimum;
+                $candidate = $this->nextOpening(
+                    $cursor,
+                    $timezone,
+                    $days,
+                    $excluded,
+                    $startTime,
+                    $endTime,
+                );
 
-                        continue;
+                // Hindari bentrok dengan jadwal tersimpan dan pengiriman aktual.
+                $conflict = null;
+
+                foreach ($events as $event) {
+                    $distance = abs(
+                        $candidate->getTimestamp() - $event->getTimestamp()
+                    );
+
+                    if ($distance < $spacing) {
+                        $conflict = $event;
+                        break;
                     }
                 }
 
+                if ($conflict !== null) {
+                    $cursor = $conflict->addSeconds($spacing);
+
+                    continue;
+                }
+
+                // Batas per jam menggunakan jam lokal campaign.
                 $hourKey = $candidate->format('Y-m-d H');
+
                 if (($hourlyCounts[$hourKey] ?? 0) >= $rateLimit) {
-                    $candidate = $candidate->startOfHour()->addHour();
+                    $cursor = $candidate->startOfHour()->addHour();
 
                     continue;
                 }
@@ -73,15 +188,180 @@ final class BusinessSchedule
             }
 
             $plan[(string) $id] = $candidate->setTimezone('UTC');
-            $hourlyCounts[$candidate->format('Y-m-d H')] = ($hourlyCounts[$candidate->format('Y-m-d H')] ?? 0) + 1;
-            $last = $candidate;
+
+            $hourKey = $candidate->format('Y-m-d H');
+            $hourlyCounts[$hourKey] = ($hourlyCounts[$hourKey] ?? 0) + 1;
+
+            $events[] = $candidate;
+
+            usort(
+                $events,
+                fn (CarbonImmutable $a, CarbonImmutable $b): int => $a->getTimestamp() <=> $b->getTimestamp()
+            );
+
             $cursor = $candidate->addSeconds($spacing);
         }
 
         return $plan;
     }
 
-    /** @param array<int, int> $days @param array<string, int> $excluded */
+    public function isWithinBusinessWindow(
+        Campaign $campaign,
+        ?CarbonInterface $at = null,
+    ): bool {
+        $timezone = (string) (
+            $campaign->timezone
+            ?: config('proposals.defaults.timezone', 'Asia/Jakarta')
+        );
+
+        try {
+            new DateTimeZone($timezone);
+        } catch (Throwable) {
+            throw new RuntimeException("Timezone campaign tidak valid: {$timezone}");
+        }
+
+        $rawDays = $campaign->business_days;
+
+        $days = array_values(array_unique(array_map(
+            'intval',
+            is_array($rawDays) ? $rawDays : [1, 2, 3, 4, 5],
+        )));
+
+        if ($days === [] || array_diff($days, [1, 2, 3, 4, 5, 6, 7]) !== []) {
+            throw new RuntimeException(
+                'Hari aktif harus berisi minimal satu hari valid (1-7).'
+            );
+        }
+
+        $excludedDates = is_array($campaign->excluded_dates)
+            ? $campaign->excluded_dates
+            : [];
+
+        $excluded = [];
+
+        foreach ($excludedDates as $date) {
+            if (
+                ! is_string($date)
+                || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                || ! $this->isValidDate($date)
+            ) {
+                throw new RuntimeException(
+                    'Tanggal pengecualian harus menggunakan format YYYY-MM-DD yang valid.'
+                );
+            }
+
+            $excluded[$date] = true;
+        }
+
+        $startTime = $this->normalizeTime(
+            (string) ($campaign->business_start ?: '09:00')
+        );
+
+        $endTime = $this->normalizeTime(
+            (string) ($campaign->business_end ?: '17:00')
+        );
+
+        if ($endTime <= $startTime) {
+            throw new RuntimeException(
+                'Jam selesai operasional harus lebih besar dari jam mulai.'
+            );
+        }
+
+        $local = CarbonImmutable::instance(
+            $at ?? CarbonImmutable::now('UTC')
+        )->setTimezone($timezone);
+
+        $dateKey = $local->format('Y-m-d');
+        $time = $local->format('H:i:s');
+
+        return in_array((int) $local->dayOfWeekIso, $days, true)
+            && ! isset($excluded[$dateKey])
+            && $time >= $startTime
+            && $time < $endTime;
+    }
+
+    /**
+     * Mengambil slot yang sudah dipesan dan pengiriman aktual
+     * milik campaign, tanpa menghitung satu percobaan dua kali.
+     *
+     * @param  array<int, string>  $recipientIds
+     * @return array<int, CarbonImmutable>
+     */
+    private function existingEvents(
+        Campaign $campaign,
+        array $recipientIds,
+        CarbonImmutable $start,
+        int $spacing,
+        string $timezone,
+    ): array {
+        $events = [];
+
+        $reservations = DB::table('campaign_recipients as cr')
+            ->where('cr.campaign_id', $campaign->id)
+            ->whereIn('cr.delivery_status', [
+                DeliveryStatus::Scheduled->value,
+                DeliveryStatus::Processing->value,
+            ])
+            ->whereNotNull('cr.scheduled_at')
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('proposal_delivery_attempts as used')
+                    ->whereColumn(
+                        'used.campaign_recipient_id',
+                        'cr.id'
+                    )
+                    ->whereColumn(
+                        'used.attempted_at',
+                        '>=',
+                        'cr.scheduled_at'
+                    );
+            });
+
+        if ($recipientIds !== []) {
+            $reservations->whereNotIn('cr.id', $recipientIds);
+        }
+
+        foreach ($reservations->pluck('cr.scheduled_at') as $timestamp) {
+            $events[] = CarbonImmutable::parse(
+                $timestamp,
+                'UTC'
+            )->setTimezone($timezone);
+        }
+
+        $attempts = DB::table('proposal_delivery_attempts as pda')
+            ->join(
+                'campaign_recipients as cr',
+                'cr.id',
+                '=',
+                'pda.campaign_recipient_id'
+            )
+            ->where('cr.campaign_id', $campaign->id)
+            ->where(
+                'pda.attempted_at',
+                '>=',
+                $start->startOfHour()->utc()
+            )
+            ->pluck('pda.attempted_at');
+
+        foreach ($attempts as $timestamp) {
+            $events[] = CarbonImmutable::parse(
+                $timestamp,
+                'UTC'
+            )->setTimezone($timezone);
+        }
+
+        usort(
+            $events,
+            fn (CarbonImmutable $a, CarbonImmutable $b): int => $a->getTimestamp() <=> $b->getTimestamp()
+        );
+
+        return $events;
+    }
+
+    /**
+     * @param  array<int, int>  $days
+     * @param  array<string, bool>  $excluded
+     */
     private function nextOpening(
         CarbonImmutable $at,
         string $timezone,
@@ -96,14 +376,24 @@ final class BusinessSchedule
             $dateKey = $candidate->format('Y-m-d');
             $weekday = (int) $candidate->dayOfWeekIso;
 
-            if (! in_array($weekday, $days, true) || isset($excluded[$dateKey])) {
+            if (
+                ! in_array($weekday, $days, true)
+                || isset($excluded[$dateKey])
+            ) {
                 $candidate = $candidate->addDay()->startOfDay();
 
                 continue;
             }
 
-            $open = CarbonImmutable::parse($dateKey.' '.$startTime, $timezone);
-            $close = CarbonImmutable::parse($dateKey.' '.$endTime, $timezone);
+            $open = CarbonImmutable::parse(
+                $dateKey.' '.$startTime,
+                $timezone,
+            );
+
+            $close = CarbonImmutable::parse(
+                $dateKey.' '.$endTime,
+                $timezone,
+            );
 
             if ($candidate->lessThan($open)) {
                 return $open;
@@ -118,11 +408,27 @@ final class BusinessSchedule
             return $candidate;
         }
 
-        throw new \RuntimeException('Tidak ada slot pengiriman dalam rentang jadwal yang wajar.');
+        throw new RuntimeException(
+            'Tidak ada slot pengiriman dalam rentang 800 hari.'
+        );
     }
 
-    private function time(string $value): string
+    private function normalizeTime(string $value): string
     {
+        if (! preg_match(
+            '/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/',
+            $value
+        )) {
+            throw new RuntimeException("Format jam tidak valid: {$value}");
+        }
+
         return strlen($value) === 5 ? $value.':00' : $value;
+    }
+
+    private function isValidDate(string $value): bool
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
+        return $date !== false && $date->format('Y-m-d') === $value;
     }
 }

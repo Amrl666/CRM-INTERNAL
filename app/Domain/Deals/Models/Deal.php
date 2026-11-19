@@ -5,6 +5,7 @@ namespace App\Domain\Deals\Models;
 use App\Domain\Companies\Models\Company;
 use App\Domain\Deals\Enums\DealStatus;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -50,5 +51,14 @@ class Deal extends Model
     public function histories(): HasMany
     {
         return $this->hasMany(DealStageHistory::class)->latest('changed_at');
+    }
+
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        if ($user->can('leads.assign')) {
+            return $query;
+        }
+
+        return $query->where('owner_id', $user->id);
     }
 }

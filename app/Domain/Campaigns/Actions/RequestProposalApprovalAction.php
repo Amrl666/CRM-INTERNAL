@@ -7,12 +7,15 @@ use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Enums\PdfStatus;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Services\ProposalApprovalSnapshot;
+use App\Models\User;
 
 final class RequestProposalApprovalAction
 {
     public function __construct(
         private readonly RefreshProposalEligibilityAction $eligibility,
         private readonly RenderProposalMessageAction $renderMessage,
+        private readonly ProposalApprovalSnapshot $snapshot,
         private readonly RecordAuditAction $audit,
     ) {}
 
@@ -22,6 +25,7 @@ final class RequestProposalApprovalAction
             throw new \InvalidArgumentException('Campaign tidak dapat diajukan untuk approval pada status ini.');
         }
 
+        $user = User::query()->findOrFail($userId);
         $summary = $this->eligibility->handle($campaign, $userId);
 
         if ($summary['eligible'] === 0) {
@@ -42,15 +46,45 @@ final class RequestProposalApprovalAction
             ->with(['contact.company', 'lead.source'])
             ->each(fn ($recipient) => $this->renderMessage->handle($recipient));
 
+        if ($user->hasRole('super_admin')) {
+            $approvalSnapshot = $this->snapshot->build($campaign);
+
+            $campaign->update([
+                'status' => CampaignStatus::Approved,
+                'approved_by' => $userId,
+                'approved_at' => now(),
+                'approved_revision' => $campaign->revision,
+                'approval_snapshot' => $approvalSnapshot,
+            ]);
+
+            $this->audit->handle(
+                user: $userId,
+                action: 'proposal_campaign.auto_approved_super_admin',
+                subject: $campaign,
+                after: [
+                    'revision' => $campaign->revision,
+                    'recipients' => count($approvalSnapshot['recipients']),
+                    'channel' => $campaign->channel?->value,
+                ],
+            );
+
+            return $campaign->refresh();
+        }
+
         $campaign->update(['status' => CampaignStatus::Review]);
 
-        $this->audit->handle(user: $userId, action: 'proposal_campaign.approval_requested', subject: $campaign, after: [
-            'eligible' => $summary['eligible'],
-            'ineligible' => $summary['ineligible'],
-            'reasons' => $summary['reasons'],
-            'revision' => $campaign->revision,
-        ]);
+        $this->audit->handle(
+            user: $userId,
+            action: 'proposal_campaign.approval_requested',
+            subject: $campaign,
+            after: [
+                'eligible' => $summary['eligible'],
+                'ineligible' => $summary['ineligible'],
+                'reasons' => $summary['reasons'],
+                'revision' => $campaign->revision,
+            ],
+        );
 
-        return $campaign;
+        return $campaign->refresh();
     }
 }

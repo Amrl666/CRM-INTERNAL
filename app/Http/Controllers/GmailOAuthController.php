@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Domain\Communications\Services\GmailOAuthService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 final class GmailOAuthController
 {
@@ -18,8 +20,12 @@ final class GmailOAuthController
 
         try {
             return redirect()->away($oauth->authorizationUrl($state));
-        } catch (\RuntimeException $e) {
-            return redirect()->route('settings.index')->withErrors(['gmail' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            report($e);
+
+            return redirect()
+                ->route('settings.index')
+                ->withErrors(['gmail' => 'Koneksi Gmail belum dapat dimulai. Periksa konfigurasi OAuth.']);
         }
     }
 
@@ -30,19 +36,39 @@ final class GmailOAuthController
         $state = (string) $request->session()->pull('gmail_oauth_state');
 
         if ($state === '' || ! hash_equals($state, (string) $request->query('state'))) {
-            return redirect()->route('settings.index')->withErrors(['gmail' => 'State OAuth tidak valid.']);
+            return redirect()
+                ->route('settings.index')
+                ->withErrors(['gmail' => 'State OAuth tidak valid. Silakan ulangi koneksi Gmail.']);
         }
 
         if ($request->query('error') !== null) {
-            return redirect()->route('settings.index')->withErrors(['gmail' => 'Otorisasi Gmail dibatalkan.']);
+            return redirect()
+                ->route('settings.index')
+                ->withErrors(['gmail' => 'Otorisasi Gmail dibatalkan.']);
+        }
+
+        $code = $request->query('code');
+
+        if (! is_string($code) || trim($code) === '') {
+            return redirect()
+                ->route('settings.index')
+                ->withErrors(['gmail' => 'Authorization code Gmail tidak tersedia. Silakan ulangi koneksi.']);
         }
 
         try {
-            $account = $oauth->handleCallback((string) $request->query('code'));
-        } catch (\Throwable $e) {
-            return redirect()->route('settings.index')->withErrors(['gmail' => $e->getMessage()]);
+            $account = $oauth->handleCallback($code);
+        } catch (Throwable $e) {
+            Log::error('Gmail OAuth callback failed.', [
+                'exception' => $e::class,
+            ]);
+
+            return redirect()
+                ->route('settings.index')
+                ->withErrors(['gmail' => 'Gmail gagal dihubungkan. Periksa log aplikasi untuk detailnya.']);
         }
 
-        return redirect()->route('settings.index')->with('status', 'Gmail terhubung: '.$account->account_email);
+        return redirect()
+            ->route('settings.index')
+            ->with('status', 'Gmail terhubung: '.$account->account_email);
     }
 }

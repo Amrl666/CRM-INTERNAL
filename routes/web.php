@@ -1,15 +1,18 @@
 <?php
 
 use App\Http\Controllers\GmailOAuthController;
+use App\Http\Controllers\ProposalDocumentController;
 use App\Livewire\Analytics\Overview;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\ResetPassword;
 use App\Livewire\Dashboard\Index;
 use App\Livewire\Deals\Board;
+use App\Livewire\Inbox\Index as InboxIndex;
 use App\Livewire\Leads\Import;
 use App\Livewire\Leads\Show;
 use App\Livewire\Settings\Suppression;
+use App\Livewire\Settings\Templates;
 use App\Livewire\Tasks\Index as TaskIndex;
 use App\Livewire\Users\Form;
 use Illuminate\Support\Facades\Auth;
@@ -38,6 +41,10 @@ Route::middleware('guest')->group(function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard', Index::class)
         ->name('dashboard');
+
+    Route::get('/inbox', InboxIndex::class)
+        ->middleware('can:viewAny,App\Domain\Communications\Models\Conversation')
+        ->name('inbox.index');
 
     Route::prefix('leads')->name('leads.')->group(function () {
         Route::get('/', App\Livewire\Leads\Index::class)
@@ -78,10 +85,12 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/create', App\Livewire\Proposals\Form::class)
             ->middleware('can:create,App\Domain\Campaigns\Models\Campaign')
             ->name('create');
+        Route::get('/{campaign}/recipients/{recipient}/preview', [ProposalDocumentController::class, 'preview'])->name('recipients.preview');
+        Route::get('/{campaign}/recipients/{recipient}/download', [ProposalDocumentController::class, 'download'])->name('recipients.download');
         Route::get('/{campaign}', App\Livewire\Proposals\Show::class)->name('show');
     });
     Route::get('/analytics/overview', Overview::class)
-        ->middleware('can:viewAny,App\Domain\Deals\Models\Deal')
+        ->middleware('can:analytics.view')
         ->name('analytics.overview');
 
     Route::get('/tasks', TaskIndex::class)
@@ -89,10 +98,16 @@ Route::middleware(['auth'])->group(function () {
         ->name('tasks.index');
 
     // --- Pengaturan & pengguna -------------------------------------------
-    Route::get('/settings', App\Livewire\Settings\Index::class)->name('settings.index');
+    Route::get('/settings', App\Livewire\Settings\Index::class)
+        ->middleware('can:settings.manage')
+        ->name('settings.index');
     Route::get('/settings/suppression', Suppression::class)
         ->middleware('can:settings.manage')
         ->name('settings.suppression');
+
+    Route::get('/settings/templates', Templates::class)
+        ->middleware('can:settings.manage')
+        ->name('settings.templates');
 
     Route::get('/settings/gmail/connect', [GmailOAuthController::class, 'connect'])
         ->middleware('can:settings.manage')

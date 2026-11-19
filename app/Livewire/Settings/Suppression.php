@@ -5,6 +5,8 @@ namespace App\Livewire\Settings;
 use App\Domain\Consent\Enums\Channel;
 use App\Domain\Consent\Models\SuppressionEntry;
 use App\Domain\Consent\Services\SuppressionService;
+use App\Support\PhoneNormalizer;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -28,25 +30,58 @@ class Suppression extends Component
 
     public function add(SuppressionService $service): void
     {
-        $this->validate([
-            'address' => ['required', 'string'],
-            'reason' => ['nullable', 'string', 'max:200'],
-        ]);
+        $this->authorize('settings.manage');
 
-        if (trim($this->address) === '') {
+        $channel = Channel::tryFrom($this->channel);
+
+        if ($channel === null) {
+            $this->addError('channel', 'Kanal tidak dikenal.');
+
             return;
         }
 
-        $service->suppress(
-            Channel::from($this->channel),
-            trim($this->address),
-            trim($this->reason) ?: null,
-            auth()->id(),
-        );
+        $this->validate([
+            'channel' => ['required', Rule::enum(Channel::class)],
+            'address' => ['required', 'string', 'max:320'],
+            'reason' => ['nullable', 'string', 'max:200'],
+        ]);
 
-        $this->address = '';
-        $this->reason = '';
-        $this->refresh();
+        $address = trim($this->address);
+
+        if ($channel === Channel::Email && filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+            $this->addError('address', 'Format email tidak valid.');
+
+            return;
+        }
+
+        if ($channel === Channel::WhatsApp && PhoneNormalizer::toE164($address) === null) {
+            $this->addError('address', 'Nomor WhatsApp tidak valid. Gunakan format Indonesia, misalnya 0812...');
+
+            return;
+        }
+
+        try {
+            $entry = $service->suppress(
+                $channel,
+                $address,
+                trim($this->reason) ?: null,
+                auth()->id(),
+            );
+
+            $this->address = '';
+            $this->reason = '';
+            $this->resetValidation();
+            $this->refresh();
+
+            $this->dispatch(
+                'notify',
+                message: $entry->wasRecentlyCreated ? 'Suppression berhasil ditambahkan.' : 'Alamat tersebut sudah ada di daftar suppression.',
+                type: $entry->wasRecentlyCreated ? 'success' : 'info',
+            );
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('address', 'Suppression tidak dapat disimpan. Silakan coba lagi.');
+        }
     }
 
     private function refresh(): void

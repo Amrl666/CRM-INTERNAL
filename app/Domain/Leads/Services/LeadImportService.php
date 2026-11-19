@@ -7,6 +7,7 @@ use App\Domain\Leads\Actions\CreateLeadAction;
 use App\Domain\Leads\Models\ImportBatch;
 use App\Domain\Leads\Models\ImportRow;
 use App\Support\PhoneNormalizer;
+use Illuminate\Support\Facades\DB;
 use OpenSpout\Reader\XLSX\Reader as XlsxReader;
 
 final class LeadImportService
@@ -51,10 +52,8 @@ final class LeadImportService
     {
         $headers = [];
         $dataRow = 0;
-        $success = 0;
-        $failed = 0;
-        $duplicate = 0;
-        $seen = [];
+        $seenEmails = [];
+        $seenPhones = [];
 
         foreach ($this->iterate($path, $extension) as $index => $row) {
             if ($index === 0) {
@@ -66,54 +65,92 @@ final class LeadImportService
             $dataRow++;
             $raw = array_combine($headers, array_pad($row, count($headers), null)) ?: [];
             $normalized = array_map(fn ($v) => trim((string) $v), $raw);
-            $error = $this->validateRow($normalized, $headers);
 
-            if ($error !== null) {
-                $failed++;
-                $this->writeRow($batch, $dataRow, $raw, 'failed', $error);
+            $result = DB::transaction(function () use (
+                $batch, $dataRow, $raw, $normalized, $headers,
+                &$seenEmails, &$seenPhones
+            ): ?array {
+                $existingRow = ImportRow::query()
+                    ->where('batch_id', $batch->id)
+                    ->where('row_number', $dataRow)
+                    ->lockForUpdate()
+                    ->first();
 
-                continue;
+                if ($existingRow !== null && in_array(
+                    $existingRow->status,
+                    ['success', 'failed', 'duplicate'],
+                    true
+                )) {
+                    return null;
+                }
+
+                $error = $this->validateRow($normalized, $headers);
+
+                if ($error !== null) {
+                    $this->writeRow($batch, $dataRow, $raw, 'failed', $error);
+
+                    return ['status' => 'failed'];
+                }
+
+                $email = Contact::normalizeEmail($normalized['email'] ?? null);
+                $phone = PhoneNormalizer::toE164($normalized['phone'] ?? null);
+
+                if (
+                    ($email !== null && isset($seenEmails[$email]))
+                    || ($phone !== null && isset($seenPhones[$phone]))
+                ) {
+                    $this->writeRow($batch, $dataRow, $raw, 'duplicate', 'Duplikat di dalam file.');
+
+                    return ['status' => 'duplicate'];
+                }
+
+                if ($this->existsInDatabase($email, $phone)) {
+                    $this->writeRow($batch, $dataRow, $raw, 'duplicate', 'Kontak sudah ada di database.');
+
+                    return ['status' => 'duplicate'];
+                }
+
+                $lead = $this->createLead->handle([
+                    'company_name' => $normalized['company_name'],
+                    'contact_name' => $normalized['contact_name'],
+                    'email' => $email,
+                    'phone' => $normalized['phone'] ?? null,
+                    'industry' => $normalized['industry'] ?? null,
+                    'source' => $normalized['source'] ?? null,
+                ], $batch->created_by, grantConsent: true, consentSource: 'lead import');
+
+                $this->writeRow($batch, $dataRow, $raw, 'success', null, $lead->id);
+
+                return [
+                    'status' => 'success',
+                    'email' => $email,
+                    'phone' => $phone,
+                ];
+            });
+
+            if (($result['status'] ?? null) === 'success') {
+                if ($result['email'] !== null) {
+                    $seenEmails[$result['email']] = true;
+                }
+
+                if ($result['phone'] !== null) {
+                    $seenPhones[$result['phone']] = true;
+                }
             }
-
-            $email = Contact::normalizeEmail($normalized['email'] ?? null);
-            $phone = PhoneNormalizer::toE164($normalized['phone'] ?? null);
-            $key = ($email ?: '').'|'.($phone ?: '');
-
-            if (($email || $phone) && isset($seen[$key])) {
-                $duplicate++;
-                $this->writeRow($batch, $dataRow, $raw, 'duplicate', 'Duplikat di dalam file.');
-
-                continue;
-            }
-
-            if ($this->existsInDatabase($email, $phone)) {
-                $duplicate++;
-                $this->writeRow($batch, $dataRow, $raw, 'duplicate', 'Kontak sudah ada di database.');
-
-                continue;
-            }
-
-            $seen[$key] = true;
-
-            $lead = $this->createLead->handle([
-                'company_name' => $normalized['company_name'],
-                'contact_name' => $normalized['contact_name'],
-                'email' => $email,
-                'phone' => $normalized['phone'] ?? null,
-                'industry' => $normalized['industry'] ?? null,
-                'source' => $normalized['source'] ?? null,
-            ], $batch->created_by);
-
-            $success++;
-            $this->writeRow($batch, $dataRow, $raw, 'success', null, $lead->id);
         }
+
+        $counts = ImportRow::query()
+            ->where('batch_id', $batch->id)
+            ->selectRaw('status, COUNT(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
 
         $batch->update([
             'status' => 'completed',
             'total_rows' => $dataRow,
-            'success_rows' => $success,
-            'failed_rows' => $failed,
-            'duplicate_rows' => $duplicate,
+            'success_rows' => (int) ($counts['success'] ?? 0),
+            'failed_rows' => (int) ($counts['failed'] ?? 0),
+            'duplicate_rows' => (int) ($counts['duplicate'] ?? 0),
         ]);
     }
 
@@ -178,6 +215,10 @@ final class LeadImportService
             return 'Format email tidak valid.';
         }
 
+        if ($phone !== '' && PhoneNormalizer::toE164($phone) === null) {
+            return 'Format nomor telepon tidak valid.';
+        }
+
         return null;
     }
 
@@ -196,13 +237,17 @@ final class LeadImportService
 
     private function writeRow(ImportBatch $batch, int $rowNumber, array $raw, string $status, ?string $error, ?string $leadId = null): void
     {
-        ImportRow::create([
-            'batch_id' => $batch->id,
-            'row_number' => $rowNumber,
-            'raw' => $raw,
-            'status' => $status,
-            'error' => $error,
-            'lead_id' => $leadId,
-        ]);
+        ImportRow::updateOrCreate(
+            [
+                'batch_id' => $batch->id,
+                'row_number' => $rowNumber,
+            ],
+            [
+                'raw' => $raw,
+                'status' => $status,
+                'error' => $error,
+                'lead_id' => $leadId,
+            ]
+        );
     }
 }

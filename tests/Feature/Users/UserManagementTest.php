@@ -77,3 +77,20 @@ it('prevents self-deactivation', function () {
 
     expect($admin->fresh()->is_active)->toBeTrue();
 });
+
+it('prevents deactivating the last active super admin', function () {
+    $lastSuperAdmin = User::factory()->create(['is_active' => true]);
+    $lastSuperAdmin->assignRole('super_admin');
+
+    $inactiveSuperAdmin = User::factory()->create(['is_active' => false]);
+    $inactiveSuperAdmin->assignRole('super_admin');
+
+    $admin = User::factory()->create(['is_active' => true]);
+    $admin->assignRole('admin');
+
+    Livewire\Livewire::actingAs($admin)->test(Index::class)
+        ->call('toggleActive', $lastSuperAdmin->id)
+        ->assertHasErrors('search');
+
+    expect($lastSuperAdmin->fresh()->is_active)->toBeTrue();
+});

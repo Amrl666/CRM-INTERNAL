@@ -6,6 +6,7 @@ use App\Domain\Companies\Models\Company;
 use App\Domain\Deals\Models\Deal;
 use App\Domain\Deals\Models\Pipeline;
 use App\Domain\Deals\Models\PipelineStage;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -53,32 +54,50 @@ class Form extends Component
             'stage_id' => ['required', 'uuid', 'exists:pipeline_stages,id'],
         ]);
 
+        $data['title'] = trim($data['title']);
+
         $stage = PipelineStage::findOrFail($data['stage_id']);
 
-        if ($this->dealId !== null) {
-            $deal = Deal::findOrFail($this->dealId);
-            $deal->update([
-                'company_id' => $data['company_id'],
-                'title' => $data['title'],
-                'value' => $data['value'],
-                'expected_close_date' => $data['expected_close_date'] ?: null,
-                'stage_id' => $stage->id,
-            ]);
+        try {
+            if ($this->dealId !== null) {
+                $deal = Deal::findOrFail($this->dealId);
+                $this->authorize('update', $deal);
+
+                DB::transaction(function () use ($deal, $data, $stage): void {
+                    $deal->update([
+                        'company_id' => $data['company_id'],
+                        'pipeline_id' => $stage->pipeline_id,
+                        'title' => $data['title'],
+                        'value' => $data['value'],
+                        'expected_close_date' => $data['expected_close_date'] ?: null,
+                        'stage_id' => $stage->id,
+                    ]);
+                });
+
+                session()->flash('status', 'Deal berhasil diperbarui.');
+
+                return redirect()->route('deals.index');
+            }
+
+            DB::transaction(function () use ($data, $stage): void {
+                Deal::create([
+                    'company_id' => $data['company_id'],
+                    'pipeline_id' => $stage->pipeline_id,
+                    'stage_id' => $stage->id,
+                    'owner_id' => auth()->id(),
+                    'title' => $data['title'],
+                    'value' => $data['value'],
+                    'expected_close_date' => $data['expected_close_date'] ?: null,
+                ]);
+            });
+
+            session()->flash('status', 'Deal berhasil dibuat.');
 
             return redirect()->route('deals.index');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('form', 'Deal tidak dapat disimpan. Silakan periksa kembali data dan coba lagi.');
         }
-
-        Deal::create([
-            'company_id' => $data['company_id'],
-            'pipeline_id' => $stage->pipeline_id,
-            'stage_id' => $stage->id,
-            'owner_id' => auth()->id(),
-            'title' => $data['title'],
-            'value' => $data['value'],
-            'expected_close_date' => $data['expected_close_date'] ?: null,
-        ]);
-
-        return redirect()->route('deals.index');
     }
 
     public function render()

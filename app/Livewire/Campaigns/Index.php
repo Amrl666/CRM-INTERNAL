@@ -7,7 +7,7 @@ use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Layout('layouts.sidebar', ['heading' => 'Campaign'])]
+#[Layout('layouts.sidebar', ['heading' => 'Email Drafts'])]
 class Index extends Component
 {
     use WithPagination;

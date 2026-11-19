@@ -3,17 +3,32 @@
 namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
 {
-    protected function setUp(): void
+    protected function setUpTraits()
     {
-        parent::setUp();
+        $environment = app()->environment();
+        $connection = config('database.default');
+        $database = config("database.connections.{$connection}.database");
+        $username = config("database.connections.{$connection}.username");
 
-        $database = (string) config('database.connections.'.config('database.default').'.database');
-
-        if (! str_ends_with($database, '_test')) {
-            $this->fail("Refusing to run tests against database [{$database}]: name must end with _test.");
+        if (
+            $environment !== 'testing'
+            || $connection !== 'pgsql'
+            || $database !== 'crm_internal_test'
+            || $username !== 'crm_test'
+        ) {
+            throw new RuntimeException(
+                'Unsafe test database configuration. '
+                ."Environment: {$environment}, "
+                ."Connection: {$connection}, "
+                ."Database: {$database}, "
+                ."Username: {$username}"
+            );
         }
+
+        return parent::setUpTraits();
     }
 }

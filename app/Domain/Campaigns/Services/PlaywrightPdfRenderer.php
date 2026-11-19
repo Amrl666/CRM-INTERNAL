@@ -23,7 +23,9 @@ final class PlaywrightPdfRenderer implements ProposalPdfRenderer
                 base_path('resources/js/render-pdf.mjs'),
                 $input,
                 $outputPath,
-            ], base_path());
+            ], base_path(), [
+                'PLAYWRIGHT_BROWSERS_PATH' => '/home/LAB-01/.cache/ms-playwright',
+            ]);
             $process->setTimeout(120);
             $process->run();
 

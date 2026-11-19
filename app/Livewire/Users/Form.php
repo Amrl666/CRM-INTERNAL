@@ -6,6 +6,7 @@ use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Identity\Actions\AssignRoleAction;
 use App\Domain\Identity\Actions\CreateUserAction;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -14,7 +15,7 @@ use Spatie\Permission\Models\Role;
 #[Layout('layouts.sidebar', ['heading' => 'Form Pengguna'])]
 class Form extends Component
 {
-    public ?User $user = null;
+    public ?string $userId = null;
 
     public string $name = '';
 
@@ -32,9 +33,9 @@ class Form extends Component
 
     public function mount(?User $user = null): void
     {
-        if ($user !== null) {
+        if ($user !== null && $user->exists) {
             $this->authorize('update', $user);
-            $this->user = $user;
+            $this->userId = $user->id;
             $this->name = $user->name;
             $this->email = $user->email;
             $this->phone = (string) $user->phone;
@@ -52,56 +53,75 @@ class Form extends Component
     ): void {
         $this->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:320', Rule::unique('users', 'email')->ignore($this->user?->id)],
+            'email' => ['required', 'string', 'email', 'max:320', Rule::unique('users', 'email')->ignore($this->userId)],
             'phone' => ['nullable', 'string', 'max:20'],
             'role' => ['required', Rule::in(Role::pluck('name')->all())],
             'is_active' => ['boolean'],
-            'password' => [$this->user ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
+            'password' => [$this->userId ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
         ]);
 
-        if ($this->user === null) {
-            $user = $createUser->handle([
-                'name' => $this->name,
-                'email' => $this->email,
-                'password' => $this->password,
-                'role' => $this->role,
-                'phone' => $this->phone !== '' ? $this->phone : null,
-                'is_active' => $this->is_active,
-            ], auth()->id());
+        $user = $this->userId !== null ? User::findOrFail($this->userId) : null;
 
-            session()->flash('status', 'Pengguna berhasil dibuat.');
+        if ($user !== null) {
+            $this->authorize('update', $user);
+        }
 
-            $this->redirectRoute('users.edit', ['user' => $user->id], navigate: false);
+        if ($user !== null && $user->id === auth()->id() && ! $this->is_active) {
+            $this->addError('is_active', 'Anda tidak dapat menonaktifkan akun sendiri.');
 
             return;
         }
 
-        $before = $this->user->only(['name', 'email', 'phone', 'is_active']);
+        try {
+            if ($user === null) {
+                $user = $createUser->handle([
+                    'name' => trim($this->name),
+                    'email' => $this->email,
+                    'password' => $this->password,
+                    'role' => $this->role,
+                    'phone' => $this->phone !== '' ? trim($this->phone) : null,
+                    'is_active' => $this->is_active,
+                ], auth()->id());
 
-        $this->user->update([
-            'name' => $this->name,
-            'email' => mb_strtolower($this->email),
-            'phone' => $this->phone !== '' ? $this->phone : null,
-            'is_active' => $this->is_active,
-        ]);
+                session()->flash('status', 'Pengguna berhasil dibuat.');
 
-        if ($this->password !== '') {
-            $this->user->update(['password' => $this->password]);
+                $this->redirectRoute('users.edit', ['user' => $user->id], navigate: false);
+
+                return;
+            }
+
+            DB::transaction(function () use ($user, $assignRole, $audit): void {
+                $before = $user->only(['name', 'email', 'phone', 'is_active']);
+
+                $user->update([
+                    'name' => trim($this->name),
+                    'email' => mb_strtolower($this->email),
+                    'phone' => $this->phone !== '' ? trim($this->phone) : null,
+                    'is_active' => $this->is_active,
+                ]);
+
+                if ($this->password !== '') {
+                    $user->update(['password' => $this->password]);
+                }
+
+                if ($this->role !== $user->getRoleNames()->first()) {
+                    $assignRole->handle($user, $this->role, auth()->id());
+                }
+
+                $audit->handle(
+                    user: auth()->id(),
+                    action: 'user.updated',
+                    subject: $user,
+                    before: $before,
+                    after: $user->only(['name', 'email', 'phone', 'is_active']),
+                );
+            });
+
+            $this->dispatch('notify', message: 'Pengguna berhasil diperbarui.', type: 'success');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('form', 'Pengguna tidak dapat disimpan. Silakan periksa kembali data dan coba lagi.');
         }
-
-        if ($this->role !== $this->user->getRoleNames()->first()) {
-            $assignRole->handle($this->user, $this->role, auth()->id());
-        }
-
-        $audit->handle(
-            user: auth()->id(),
-            action: 'user.updated',
-            subject: $this->user,
-            before: $before,
-            after: $this->user->only(['name', 'email', 'phone', 'is_active']),
-        );
-
-        session()->flash('status', 'Pengguna berhasil diperbarui.');
     }
 
     public function render()

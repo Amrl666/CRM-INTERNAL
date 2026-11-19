@@ -28,4 +28,16 @@ final class FakeWhatsAppProvider implements WhatsAppProvider
     {
         return 'fake';
     }
+
+    public function sendText(string $number, string $text): array
+    {
+        return [
+            'provider_message_id' => 'fake-'.uniqid(),
+            'status' => 'PENDING',
+            'payload' => [
+                'key' => ['id' => 'fake-'.uniqid(), 'fromMe' => true],
+                'status' => 'PENDING',
+            ],
+        ];
+    }
 }

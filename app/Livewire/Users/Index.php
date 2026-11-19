@@ -31,11 +31,21 @@ class Index extends Component
         $this->resetPage();
     }
 
+    public function updatedRole(): void
+    {
+        $this->resetPage();
+    }
+
+    public function clearFilters(): void
+    {
+        $this->reset('search', 'role');
+        $this->resetPage();
+    }
+
     public function toggleActive(int $userId, RecordAuditAction $audit): void
     {
-        $this->authorize('update', User::class);
-
         $user = User::findOrFail($userId);
+        $this->authorize('update', $user);
 
         if ($user->id === auth()->id()) {
             $this->addError('search', 'Anda tidak dapat menonaktifkan akun sendiri.');
@@ -43,16 +53,34 @@ class Index extends Component
             return;
         }
 
-        $user->update(['is_active' => ! $user->is_active]);
+        if ($user->is_active && $user->hasRole('super_admin')) {
+            $activeSuperAdmins = User::query()
+                ->where('is_active', true)
+                ->role('super_admin')
+                ->count();
 
-        $audit->handle(
-            user: auth()->id(),
-            action: $user->is_active ? 'user.activated' : 'user.deactivated',
-            subject: $user,
-            after: ['is_active' => $user->is_active],
-        );
+            if ($activeSuperAdmins <= 1) {
+                $this->addError('search', 'Super admin aktif terakhir tidak dapat dinonaktifkan.');
 
-        $this->dispatch('user-updated');
+                return;
+            }
+        }
+
+        try {
+            $user->update(['is_active' => ! $user->is_active]);
+
+            $audit->handle(
+                user: auth()->id(),
+                action: $user->is_active ? 'user.activated' : 'user.deactivated',
+                subject: $user,
+                after: ['is_active' => $user->is_active],
+            );
+
+            $this->dispatch('notify', message: $user->is_active ? 'Pengguna berhasil diaktifkan.' : 'Pengguna berhasil dinonaktifkan.', type: 'success');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('search', 'Status pengguna tidak dapat diubah. Silakan coba lagi.');
+        }
     }
 
     public function render()

@@ -5,8 +5,8 @@ namespace App\Domain\Communications\Actions;
 use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Communications\Contracts\EmailProvider;
 use App\Domain\Communications\DTOs\EmailMessageData;
-use App\Domain\Communications\Models\CommunicationAccount;
 use App\Domain\Communications\Models\CommunicationMessage;
+use App\Domain\Communications\Services\GmailAccountAuthenticator;
 use App\Domain\Consent\Enums\Channel;
 use App\Domain\Contacts\Models\Contact;
 
@@ -15,6 +15,7 @@ final class CreateEmailDraftAction
     public function __construct(
         private readonly EmailProvider $emailProvider,
         private readonly RecordAuditAction $audit,
+        private readonly GmailAccountAuthenticator $gmailAuthenticator,
     ) {}
 
     public function handle(
@@ -24,10 +25,7 @@ final class CreateEmailDraftAction
         int $createdBy,
         ?string $campaignId = null,
     ): CommunicationMessage {
-        $account = CommunicationAccount::query()
-            ->where('provider', 'gmail')
-            ->where('connection_status', 'connected')
-            ->first();
+        $account = $this->gmailAuthenticator->connectedAccount();
 
         $result = $this->emailProvider->createDraft(new EmailMessageData(
             to: (string) $contact->normalized_email,

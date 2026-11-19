@@ -5,7 +5,6 @@ namespace App\Livewire\Settings;
 use App\Domain\Communications\Contracts\EmailProvider;
 use App\Domain\Communications\Contracts\WhatsAppProvider;
 use App\Domain\Communications\Models\CommunicationAccount;
-use App\Models\User;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -14,7 +13,7 @@ class Index extends Component
 {
     public function mount(): void
     {
-        $this->authorize('viewAny', User::class);
+        $this->authorize('settings.manage');
     }
 
     public function render()

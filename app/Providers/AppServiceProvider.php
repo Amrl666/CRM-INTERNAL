@@ -13,14 +13,18 @@ use App\Domain\Communications\Fakes\FakeEmailProvider;
 use App\Domain\Communications\Fakes\FakeProposalEmailSender;
 use App\Domain\Communications\Fakes\FakeProposalWhatsAppSender;
 use App\Domain\Communications\Fakes\FakeWhatsAppProvider;
+use App\Domain\Communications\Listeners\ReleaseGmailSyncOnUniqueJobSkipped;
 use App\Domain\Communications\Providers\EvolutionClient;
 use App\Domain\Communications\Providers\EvolutionProposalSender;
 use App\Domain\Communications\Providers\GmailProposalSender;
 use App\Domain\Communications\Providers\GmailProvider;
 use App\Domain\Communications\Services\CommunicationManager;
+use App\Domain\Communications\Services\GmailAccountAuthenticator;
 use App\Domain\Communications\Services\OutboundModeGuard;
 use App\Models\User;
 use Google\Client;
+use Illuminate\Queue\Events\UniqueJobSkipped;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -34,7 +38,7 @@ class AppServiceProvider extends ServiceProvider
             return match (config('communications.email.default')) {
                 'fake' => new FakeEmailProvider,
                 'gmail' => new GmailProvider(
-                    $this->app->make(Client::class)
+                    $this->app->make(GmailAccountAuthenticator::class)
                 ),
                 default => throw new \RuntimeException(
                     'Email provider ['.config('communications.email.default').'] belum dikonfigurasi. Gunakan EMAIL_PROVIDER=fake untuk lokal.'
@@ -66,7 +70,7 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(ProposalEmailSender::class, function () {
             return config('communications.email.default') === 'gmail'
-                ? new GmailProposalSender($this->app->make(Client::class))
+                ? new GmailProposalSender($this->app->make(GmailAccountAuthenticator::class))
                 : new FakeProposalEmailSender;
         });
 
@@ -79,6 +83,11 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Event::listen(
+            UniqueJobSkipped::class,
+            ReleaseGmailSyncOnUniqueJobSkipped::class,
+        );
+
         $this->app->make(OutboundModeGuard::class)->boot();
 
         // Super Admin melewati seluruh pemeriksaan permission.

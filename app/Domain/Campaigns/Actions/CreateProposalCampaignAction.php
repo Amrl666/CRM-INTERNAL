@@ -19,7 +19,10 @@ use Illuminate\Support\Facades\DB;
 
 final class CreateProposalCampaignAction
 {
-    public function __construct(private readonly RecordAuditAction $audit) {}
+    public function __construct(
+        private readonly RecordAuditAction $audit,
+        private readonly RefreshProposalEligibilityAction $eligibility,
+    ) {}
 
     /**
      * @param  string[]  $leadIds
@@ -98,6 +101,8 @@ final class CreateProposalCampaignAction
             if ($campaign->recipients()->count() === 0) {
                 throw new \InvalidArgumentException('Tidak ada lead aktif dengan kontak yang dapat dijadikan penerima.');
             }
+
+            $this->eligibility->handle($campaign, $createdBy);
 
             return $campaign;
         });

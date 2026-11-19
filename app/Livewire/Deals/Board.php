@@ -29,18 +29,32 @@ class Board extends Component
 
         $this->authorize('update', $deal);
 
-        $action->handle($deal, $stage, auth()->id());
+        try {
+            $action->handle($deal, $stage, auth()->id());
+            $this->dispatch('notify', message: 'Deal dipindahkan ke stage '.$stage->name.'.', type: 'success');
+        } catch (\InvalidArgumentException $e) {
+            $this->addError('board', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('board', 'Deal tidak dapat dipindahkan. Silakan coba lagi.');
+        }
     }
 
     public function render()
     {
         $pipeline = $this->pipelineId ? Pipeline::with('stages')->find($this->pipelineId) : null;
 
+        if ($pipeline === null) {
+            $pipeline = Pipeline::with('stages')->where('is_default', true)->first()
+                ?? Pipeline::with('stages')->first();
+        }
+
         return view('livewire.deals.board', [
             'pipeline' => $pipeline,
             'pipelines' => Pipeline::orderBy('name')->get(),
             'stages' => $pipeline->stages ?? collect(),
             'deals' => Deal::query()
+                ->visibleTo(auth()->user())
                 ->when($pipeline, fn ($q) => $q->where('pipeline_id', $pipeline->id))
                 ->with(['company', 'owner', 'stage'])
                 ->get()
