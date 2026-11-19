@@ -8,12 +8,16 @@
     @livewireStyles
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen">
+    <a href="#auth-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-blue-700 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white">
+        Lewati ke formulir
+    </a>
+
     <div class="min-h-screen flex flex-col md:flex-row">
         <!-- Left: Decorative panel -->
-        <div class="hidden md:flex flex-1 items-center justify-center bg-slate-800 relative overflow-hidden">
+        <div class="hidden md:flex flex-1 items-center justify-center bg-slate-800 relative overflow-hidden" aria-hidden="true">
             <div class="relative text-center px-8">
                 <div class="inline-flex items-center justify-center rounded-2xl bg-white p-4 shadow-lg mb-6">
-                    <img src="{{ asset('image/logo.png') }}" alt="Prospectra" class="h-24 w-24" />
+                    <img src="{{ asset('image/logo.png') }}" alt="" class="h-24 w-24" />
                 </div>
                 <h1 class="text-3xl font-bold text-white mb-2">{{ config('app.name') }}</h1>
                 <p class="text-slate-300 text-sm max-w-xs mx-auto leading-relaxed">
@@ -22,13 +26,13 @@
             </div>
         </div>
 
-        <!-- Right: Login form -->
-        <div class="flex-1 flex items-center justify-center p-6 md:p-12 bg-white">
+        <!-- Right: Auth form -->
+        <main id="auth-content" class="flex-1 flex items-center justify-center p-6 md:p-12 bg-white">
             <div class="w-full max-w-sm">
                 {{ $slot }}
             </div>
-        </div>
+        </main>
     </div>
     @livewireScripts
 </body>
-</html
+</html>

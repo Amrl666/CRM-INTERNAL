@@ -12,16 +12,19 @@ use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Enums\PdfStatus;
+use App\Domain\Campaigns\Enums\ProposalChannel;
 use App\Domain\Campaigns\Models\Campaign;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithPagination;
 
-#[Layout('layouts.sidebar', ['heading' => 'Proposal Campaign'])]
+#[Layout('layouts.sidebar', ['heading' => 'Outreach'])]
 class Show extends Component
 {
     use WithPagination;
 
+    #[Locked]
     public Campaign $campaign;
 
     public string $cancelReason = '';
@@ -36,38 +39,70 @@ class Show extends Component
     public function requestApproval(RequestProposalApprovalAction $action): void
     {
         $this->authorize('update', $this->campaign);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()));
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Campaign diajukan untuk approval.');
     }
 
     public function approve(ApproveProposalCampaignAction $action): void
     {
         $this->authorize('approve', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()));
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Campaign berhasil disetujui.');
+    }
+
+    public function submitForReview(): void
+    {
+        $this->authorize('update', $this->campaign);
+        $this->resetErrorBag();
+
+        if ($this->campaign->status !== CampaignStatus::Draft) {
+            $this->addError('campaign', 'Campaign hanya dapat diajukan pada status draft.');
+
+            return;
+        }
+
+        $start = function (): void {
+            $this->campaign = app(RequestProposalApprovalAction::class)->handle($this->campaign, (int) auth()->id());
+
+            if ($this->campaign->status === CampaignStatus::Review) {
+                $this->campaign = app(ApproveProposalCampaignAction::class)->handle($this->campaign, (int) auth()->id());
+            }
+        };
+
+        $this->run($start, 'Campaign berhasil diajukan untuk review dan disetujui.');
+
+        $this->campaign->refresh();
     }
 
     public function schedule(ScheduleProposalCampaignAction $action): void
     {
         $this->authorize('send', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()));
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Pengiriman berhasil dijadwalkan.');
     }
 
     public function pause(PauseProposalCampaignAction $action): void
     {
         $this->authorize('send', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()));
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Campaign dijeda.');
     }
 
     public function resume(ResumeProposalCampaignAction $action): void
     {
         $this->authorize('send', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()));
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Campaign dilanjutkan.');
     }
 
     public function cancel(CancelProposalCampaignAction $action): void
     {
         $this->authorize('cancel', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id(), $this->cancelReason ?: null));
-        $this->cancelReason = '';
+        $this->validate(['cancelReason' => ['nullable', 'string', 'max:500']]);
+
+        $cancelled = $this->run(
+            fn () => $action->handle($this->campaign, (int) auth()->id(), trim($this->cancelReason) ?: null),
+            'Campaign dibatalkan.',
+        );
+
+        if ($cancelled) {
+            $this->cancelReason = '';
+        }
     }
 
     public function render()
@@ -77,10 +112,18 @@ class Show extends Component
             ->orderBy('created_at')
             ->paginate(25);
 
-        $preview = $this->campaign->recipients()
-            ->where('eligibility_status', EligibilityStatus::Eligible)
-            ->whereNotNull('rendered_subject')
-            ->first();
+        $previewQuery = $this->campaign->recipients()
+            ->where('eligibility_status', EligibilityStatus::Eligible);
+
+        if ($this->campaign->channel === ProposalChannel::WhatsApp) {
+            $previewQuery
+                ->whereNotNull('rendered_whatsapp')
+                ->where('rendered_whatsapp', '<>', '');
+        } else {
+            $previewQuery->whereNotNull('rendered_subject');
+        }
+
+        $preview = $previewQuery->first();
 
         return view('livewire.proposals.show', [
             'recipients' => $recipients,
@@ -109,16 +152,28 @@ class Show extends Component
         ]);
     }
 
-    private function run(callable $callback): void
+    private function run(callable $callback, ?string $successMessage = null): bool
     {
         $this->resetErrorBag();
 
         try {
             $callback();
-        } catch (\Throwable $e) {
+            $this->campaign->refresh();
+
+            if ($successMessage !== null) {
+                $this->dispatch('notify', message: $successMessage, type: 'success');
+            }
+
+            return true;
+        } catch (\InvalidArgumentException $e) {
             $this->addError('campaign', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('campaign', 'Aksi tidak dapat diproses. Silakan coba lagi.');
         }
 
         $this->campaign->refresh();
+
+        return false;
     }
 }

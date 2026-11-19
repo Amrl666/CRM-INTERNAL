@@ -8,8 +8,10 @@ use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Enums\PdfStatus;
 use App\Domain\Campaigns\Enums\ProposalChannel;
+use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\CampaignRecipient;
 use App\Domain\Campaigns\Models\ProposalDeliveryAttempt;
+use App\Domain\Campaigns\Services\BusinessSchedule;
 use App\Domain\Communications\Contracts\ProposalEmailSender;
 use App\Domain\Communications\Contracts\ProposalWhatsAppSender;
 use App\Domain\Communications\DTOs\CommunicationResult;
@@ -24,6 +26,7 @@ final class SendProposalDeliveryAction
 {
     public function __construct(
         private readonly CommunicationEligibility $eligibility,
+        private readonly BusinessSchedule $schedule,
         private readonly RenderProposalMessageAction $renderMessage,
         private readonly ProposalEmailSender $emailSender,
         private readonly ProposalWhatsAppSender $whatsAppSender,
@@ -123,8 +126,64 @@ final class SendProposalDeliveryAction
             }
         }
 
-        $attemptNumber = DB::transaction(function () use ($recipient, $campaign): int {
-            $locked = CampaignRecipient::query()->lockForUpdate()->findOrFail($recipient->id);
+        $claim = DB::transaction(function () use ($recipient, $campaign): array {
+            $lockedCampaign = Campaign::query()
+                ->lockForUpdate()
+                ->findOrFail($campaign->id);
+
+            $locked = CampaignRecipient::query()
+                ->lockForUpdate()
+                ->findOrFail($recipient->id);
+
+            if (! in_array($lockedCampaign->status, [
+                CampaignStatus::Scheduled,
+                CampaignStatus::Running,
+            ], true)) {
+                return ['attempt' => null, 'reason' => 'delivery_not_claimed'];
+            }
+
+            if (! $lockedCampaign->isApprovedForCurrentRevision()) {
+                return ['attempt' => null, 'reason' => 'delivery_not_claimed'];
+            }
+
+            if ($locked->delivery_status !== DeliveryStatus::Scheduled) {
+                return ['attempt' => null, 'reason' => 'delivery_not_claimed'];
+            }
+
+            if (
+                $locked->scheduled_at === null
+                || $locked->scheduled_at->isFuture()
+            ) {
+                return ['attempt' => null, 'reason' => 'delivery_not_claimed'];
+            }
+
+            $now = now();
+
+            // Validasi ulang slot berdasarkan pengiriman aktual dan reservasi
+            // saat worker benar-benar akan mengambil pekerjaan.
+            $runtimeSlot = $this->schedule->plan(
+                $lockedCampaign,
+                [$locked->id],
+                $now,
+            )[$locked->id] ?? null;
+
+            if ($runtimeSlot === null) {
+                return ['attempt' => null, 'reason' => 'no_available_slot'];
+            }
+
+            // Jika ada konflik spacing, rate limit, atau jam operasional,
+            // pindahkan jadwal recipient dan jangan kirim sekarang.
+            if ($runtimeSlot->greaterThan($now)) {
+                $locked->update([
+                    'scheduled_at' => $runtimeSlot,
+                ]);
+
+                return ['attempt' => null, 'reason' => 'rescheduled'];
+            }
+
+            if (! $this->schedule->isWithinBusinessWindow($lockedCampaign, $now)) {
+                return ['attempt' => null, 'reason' => 'outside_business_window'];
+            }
 
             $locked->update([
                 'delivery_status' => DeliveryStatus::Processing,
@@ -132,12 +191,26 @@ final class SendProposalDeliveryAction
                 'last_error' => null,
             ]);
 
-            if ($campaign->status === CampaignStatus::Scheduled) {
-                $campaign->update(['status' => CampaignStatus::Running, 'started_at' => now()]);
+            if ($lockedCampaign->status === CampaignStatus::Scheduled) {
+                $lockedCampaign->update([
+                    'status' => CampaignStatus::Running,
+                    'started_at' => now(),
+                ]);
             }
 
-            return (int) $locked->attempts;
+            return [
+                'attempt' => (int) $locked->attempts,
+                'reason' => null,
+            ];
         });
+
+        if ($claim['attempt'] === null) {
+            return CommunicationResult::fail(
+                $claim['reason'] ?? 'delivery_not_claimed'
+            );
+        }
+
+        $attemptNumber = $claim['attempt'];
 
         $recipient->refresh();
         $absolutePath = Storage::disk($disk)->path((string) $recipient->attachment_path);
@@ -258,21 +331,36 @@ final class SendProposalDeliveryAction
 
     private function completeCampaignIfDone(CampaignRecipient $recipient): void
     {
-        $campaign = $recipient->campaign;
+        DB::transaction(function () use ($recipient): void {
+            $campaign = Campaign::query()
+                ->lockForUpdate()
+                ->find($recipient->campaign_id);
 
-        if ($campaign->status === CampaignStatus::Paused) {
-            return;
-        }
+            if ($campaign === null) {
+                return;
+            }
 
-        $remaining = $campaign->recipients()
-            ->whereNotIn('delivery_status', DeliveryStatus::terminal())
-            ->count();
+            if (in_array($campaign->status, [
+                CampaignStatus::Paused,
+                CampaignStatus::Cancelled,
+                CampaignStatus::Completed,
+            ], true)) {
+                return;
+            }
 
-        if ($remaining === 0) {
-            $campaign->update([
-                'status' => CampaignStatus::Completed,
-                'completed_at' => now(),
-            ]);
-        }
+            $remaining = $campaign->recipients()
+                ->whereNotIn(
+                    'delivery_status',
+                    DeliveryStatus::terminal(),
+                )
+                ->count();
+
+            if ($remaining === 0) {
+                $campaign->update([
+                    'status' => CampaignStatus::Completed,
+                    'completed_at' => now(),
+                ]);
+            }
+        });
     }
 }

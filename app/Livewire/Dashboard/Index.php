@@ -2,6 +2,8 @@
 
 namespace App\Livewire\Dashboard;
 
+use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Models\CampaignRecipient;
 use App\Domain\Deals\Models\Deal;
 use App\Domain\Leads\Models\Lead;
 use App\Domain\Tasks\Models\Task;
@@ -27,27 +29,59 @@ class Index extends Component
 
     public array $dealStageCounts = [];
 
+    public int $outreachActiveCampaigns = 0;
+
+    public int $outreachScheduled = 0;
+
+    public int $outreachSent = 0;
+
+    public int $outreachFailed = 0;
+
     public function mount(): void
     {
-        $this->totalLeads = Lead::query()->count();
-        $this->activeLeads = Lead::query()->whereNull('archived_at')->count();
-        $this->qualifiedLeads = Lead::query()->where('status', 'QUALIFIED')->count();
-        $this->todayTasks = Task::query()->whereDate('due_at', today())->where('status', '!=', 'completed')->count();
-        $this->openDeals = Deal::query()->whereNull('closed_at')->count();
-        $this->wonDeals = Deal::query()->where('status', 'won')->count();
+        $user = auth()->user();
+        $leads = Lead::query()->visibleTo($user);
+        $deals = Deal::query()->visibleTo($user);
 
-        $this->leadStatusCounts = Lead::query()
+        $this->totalLeads = (clone $leads)->count();
+        $this->activeLeads = (clone $leads)->whereNull('archived_at')->count();
+        $this->qualifiedLeads = (clone $leads)->where('status', 'QUALIFIED')->count();
+        $this->todayTasks = Task::query()
+            ->whereDate('due_at', today())
+            ->where('status', '!=', 'completed')
+            ->where(function ($query) use ($user) {
+                $query->whereNull('assigned_to')->orWhere('assigned_to', $user->id);
+            })
+            ->count();
+        $this->openDeals = (clone $deals)->whereNull('closed_at')->count();
+        $this->wonDeals = (clone $deals)->where('status', 'won')->count();
+
+        $this->leadStatusCounts = (clone $leads)
             ->selectRaw('status, count(*) as total')
             ->groupBy('status')
             ->pluck('total', 'status')
             ->toArray();
 
-        $this->dealStageCounts = Deal::query()
+        $this->dealStageCounts = (clone $deals)
             ->join('pipeline_stages', 'deals.stage_id', '=', 'pipeline_stages.id')
             ->selectRaw('pipeline_stages.name, count(*) as total')
             ->groupBy('pipeline_stages.name')
             ->pluck('total', 'name')
             ->toArray();
+
+        $this->outreachActiveCampaigns = Campaign::query()
+            ->where('type', 'proposal')
+            ->whereIn('status', ['scheduled', 'running'])
+            ->count();
+        $this->outreachScheduled = CampaignRecipient::query()
+            ->where('delivery_status', 'SCHEDULED')
+            ->count();
+        $this->outreachSent = CampaignRecipient::query()
+            ->whereIn('delivery_status', ['SENT', 'ACCEPTED', 'DELIVERED'])
+            ->count();
+        $this->outreachFailed = CampaignRecipient::query()
+            ->where('delivery_status', 'FAILED')
+            ->count();
     }
 
     public function render()

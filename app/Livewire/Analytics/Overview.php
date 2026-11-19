@@ -15,12 +15,23 @@ class Overview extends Component
 {
     public function mount(): void
     {
-        $this->authorize('viewAny', Deal::class);
+        $this->authorize('analytics.view');
     }
 
     public function render()
     {
-        $activeLeads = Lead::query()->visibleTo(auth()->user())->active();
+        $user = auth()->user();
+
+        $leadScope = $user->can('leads.view')
+            ? Lead::query()->visibleTo($user)
+            : Lead::query();
+
+        $dealScope = $user->can('deals.view')
+            ? Deal::query()->visibleTo($user)
+            : Deal::query();
+
+        $activeLeads = (clone $leadScope)->active();
+        $visibleDeals = $dealScope;
 
         return view('livewire.analytics.overview', [
             'totalLeads' => (clone $activeLeads)->count(),
@@ -30,13 +41,27 @@ class Overview extends Component
                 ->groupBy('status')
                 ->orderByDesc('total')
                 ->pluck('total', 'status'),
-            'openDealsValue' => (float) Deal::where('status', DealStatus::Open)->sum('value'),
-            'wonDealsValue' => (float) Deal::where('status', DealStatus::Won)->sum('value'),
-            'wonDealsThisMonth' => Deal::where('status', DealStatus::Won)
+            'openDealsValue' => (float) (clone $visibleDeals)->where('status', DealStatus::Open)->sum('value'),
+            'wonDealsValue' => (float) (clone $visibleDeals)->where('status', DealStatus::Won)->sum('value'),
+            'wonDealsThisMonth' => (clone $visibleDeals)->where('status', DealStatus::Won)
                 ->whereBetween('closed_at', [now()->startOfMonth(), now()->endOfMonth()])
                 ->count(),
-            'activitiesLast7Days' => Activity::where('occurred_at', '>=', now()->subDays(7))->count(),
-            'recentActivities' => Activity::with('lead.company')->latest('occurred_at')->limit(10)->get(),
+            'activitiesLast7Days' => Activity::query()
+                ->where('occurred_at', '>=', now()->subDays(7))
+                ->when(
+                    $user->can('leads.view'),
+                    fn ($query) => $query->whereHas('lead', fn ($leadQuery) => $leadQuery->visibleTo($user)),
+                )
+                ->count(),
+            'recentActivities' => Activity::query()
+                ->with('lead.company')
+                ->when(
+                    $user->can('leads.view'),
+                    fn ($query) => $query->whereHas('lead', fn ($leadQuery) => $leadQuery->visibleTo($user)),
+                )
+                ->latest('occurred_at')
+                ->limit(10)
+                ->get(),
             'labels' => collect(LeadStatus::cases())->mapWithKeys(fn ($s) => [$s->value => $s->label()]),
         ]);
     }

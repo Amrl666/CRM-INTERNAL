@@ -45,7 +45,19 @@ class Index extends Component
         $lead = Lead::findOrFail($leadId);
         $this->authorize('update', $lead);
 
-        $action->handle($lead, auth()->id());
+        try {
+            $action->handle($lead, auth()->id());
+            $this->dispatch('notify', message: 'Lead berhasil diarsipkan.', type: 'success');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('archive', 'Lead tidak dapat diarsipkan. Silakan coba lagi.');
+        }
+    }
+
+    public function clearFilters(): void
+    {
+        $this->reset('search', 'status', 'priority', 'owner');
+        $this->resetPage();
     }
 
     public function render()

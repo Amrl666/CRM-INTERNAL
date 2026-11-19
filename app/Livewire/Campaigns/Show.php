@@ -8,11 +8,13 @@ use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Jobs\GenerateCampaignDraftsJob;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
-#[Layout('layouts.sidebar', ['heading' => 'Campaign'])]
+#[Layout('layouts.sidebar', ['heading' => 'Email Drafts'])]
 class Show extends Component
 {
+    #[Locked]
     public Campaign $campaign;
 
     public function mount(Campaign $campaign): void
@@ -23,12 +25,16 @@ class Show extends Component
 
     public function requestApproval(RequestCampaignApprovalAction $action): void
     {
-        $this->authorize('create', Campaign::class);
+        $this->authorize('update', $this->campaign);
 
         try {
             $action->handle($this->campaign, auth()->id());
+            $this->dispatch('notify', message: 'Campaign diajukan untuk approval.', type: 'success');
         } catch (\InvalidArgumentException $e) {
             $this->addError('campaign', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('campaign', 'Campaign tidak dapat diajukan. Silakan coba lagi.');
         }
 
         $this->campaign->refresh();
@@ -40,8 +46,12 @@ class Show extends Component
 
         try {
             $action->handle($this->campaign, auth()->id());
+            $this->dispatch('notify', message: 'Campaign berhasil disetujui.', type: 'success');
         } catch (\InvalidArgumentException $e) {
             $this->addError('campaign', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('campaign', 'Campaign tidak dapat disetujui. Silakan coba lagi.');
         }
 
         $this->campaign->refresh();
@@ -51,14 +61,23 @@ class Show extends Component
     {
         $this->authorize('send', Campaign::class);
 
+        $this->campaign->refresh();
+
         if ($this->campaign->status !== CampaignStatus::Approved) {
             $this->addError('campaign', 'Campaign harus disetujui terlebih dahulu.');
 
             return;
         }
 
-        $this->campaign->update(['status' => CampaignStatus::Sending]);
-        GenerateCampaignDraftsJob::dispatch($this->campaign->id);
+        try {
+            GenerateCampaignDraftsJob::dispatch($this->campaign->id);
+            $this->dispatch('notify', message: 'Pembuatan draft email dimasukkan ke antrean.', type: 'success');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('campaign', 'Draft email tidak dapat dimasukkan ke antrean. Silakan coba lagi.');
+        }
+
+        $this->campaign->refresh();
     }
 
     public function render()

@@ -32,6 +32,8 @@ class RoleAndPermissionSeeder extends Seeder
             'deals.close',
             'tasks.manage',
             'analytics.view',
+            'inbox.view',
+            'inbox.manage',
         ],
         'sales_manager' => [
             'leads.view',
@@ -46,6 +48,8 @@ class RoleAndPermissionSeeder extends Seeder
             'deals.close',
             'tasks.manage',
             'analytics.view',
+            'inbox.view',
+            'inbox.manage',
         ],
         'sales_agent' => [
             'leads.view',
@@ -55,6 +59,7 @@ class RoleAndPermissionSeeder extends Seeder
             'deals.view',
             'deals.update',
             'analytics.view',
+            'inbox.view',
         ],
         'analyst' => [
             'analytics.view',
@@ -64,6 +69,7 @@ class RoleAndPermissionSeeder extends Seeder
             'campaigns.view',
             'deals.view',
             'analytics.view',
+            'inbox.view',
         ],
     ];
 

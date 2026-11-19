@@ -8,11 +8,12 @@ use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\MessageTemplate;
 use App\Domain\Campaigns\Models\ProposalTemplate;
 use App\Domain\Leads\Models\Lead;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
-#[Layout('layouts.sidebar', ['heading' => 'Proposal Campaign'])]
+#[Layout('layouts.sidebar', ['heading' => 'Outreach'])]
 class Form extends Component
 {
     public string $name = '';
@@ -47,11 +48,47 @@ class Form extends Component
     {
         $this->authorize('create', Campaign::class);
         $this->timezone = (string) config('proposals.defaults.timezone', 'Asia/Jakarta');
+
+        $presets = (string) request()->query('leads', '');
+        $presetIds = collect(explode(',', $presets))
+            ->map(fn ($id) => trim((string) $id))
+            ->filter(fn ($id) => $id !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($presetIds !== []) {
+            $eligiblePresets = Lead::query()
+                ->visibleTo(auth()->user())
+                ->active()
+                ->whereNotNull('contact_id')
+                ->whereIn('id', $presetIds)
+                ->pluck('id')
+                ->all();
+
+            $this->leadIds = $eligiblePresets;
+        }
     }
 
     public function updatedChannel(): void
     {
         $this->message_template_id = '';
+    }
+
+    public function selectAllEligible(): void
+    {
+        $this->leadIds = Lead::query()
+            ->visibleTo(auth()->user())
+            ->active()
+            ->whereNotNull('contact_id')
+            ->with('contact')
+            ->latest()
+            ->limit(500)
+            ->get()
+            ->map(fn (Lead $lead) => (string) $lead->id)
+            ->all();
+
+        $this->dispatch('notify', message: 'Semua lead dalam daftar dipilih. Konsultasikan consent sebelum mengirim.', type: 'info');
     }
 
     public function save(CreateProposalCampaignAction $action)
@@ -71,7 +108,7 @@ class Form extends Component
             'excludedDates' => ['nullable', 'string'],
             'rateLimitPerHour' => ['required', 'integer', 'min:1', 'max:120'],
             'minSpacingSeconds' => ['required', 'integer', 'min:0', 'max:3600'],
-            'scheduledStartAt' => ['nullable', 'date'],
+            'scheduledStartAt' => ['nullable', 'date_format:Y-m-d\TH:i'],
         ]);
 
         $channel = ProposalChannel::from($data['channel']);
@@ -89,6 +126,22 @@ class Form extends Component
             return;
         }
 
+        $leadIds = array_values(array_unique($data['leadIds']));
+
+        $validLeadIds = Lead::query()
+            ->visibleTo(auth()->user())
+            ->active()
+            ->whereNotNull('contact_id')
+            ->whereIn('id', $leadIds)
+            ->pluck('id')
+            ->all();
+
+        if (count($validLeadIds) !== count($leadIds)) {
+            $this->addError('leadIds', 'Sebagian lead yang dipilih tidak valid, sudah diarsipkan, atau tidak memiliki kontak.');
+
+            return;
+        }
+
         $excluded = collect(preg_split('/\r\n|\r|\n/', $data['excludedDates'] ?? ''))
             ->map(fn ($date) => trim((string) $date))
             ->filter()
@@ -101,28 +154,51 @@ class Form extends Component
 
                 return;
             }
+
+            $parsed = Carbon::createFromFormat('Y-m-d', $date);
+
+            if ($parsed === false || $parsed->format('Y-m-d') !== $date) {
+                $this->addError('excludedDates', "Tanggal libur {$date} tidak valid.");
+
+                return;
+            }
         }
 
-        $campaign = $action->handle(
-            name: $data['name'],
-            proposalTemplate: ProposalTemplate::findOrFail($data['proposal_template_id']),
-            messageTemplate: $messageTemplate,
-            channel: $channel,
-            leadIds: $data['leadIds'],
-            createdBy: (int) auth()->id(),
-            settings: [
-                'timezone' => $data['timezone'],
-                'business_days' => array_map('intval', $data['businessDays']),
-                'business_start' => $data['businessStart'],
-                'business_end' => $data['businessEnd'],
-                'excluded_dates' => $excluded,
-                'rate_limit_per_hour' => $data['rateLimitPerHour'],
-                'min_spacing_seconds' => $data['minSpacingSeconds'],
-                'scheduled_start_at' => $data['scheduledStartAt'] ?: null,
-            ],
-        );
+        $scheduledStartAt = filled($data['scheduledStartAt'] ?? null)
+            ? Carbon::createFromFormat(
+                'Y-m-d\TH:i',
+                $data['scheduledStartAt'],
+                $data['timezone']
+            )->utc()
+            : null;
 
-        return redirect()->route('proposals.show', $campaign);
+        try {
+            $campaign = $action->handle(
+                name: trim($data['name']),
+                proposalTemplate: ProposalTemplate::findOrFail($data['proposal_template_id']),
+                messageTemplate: $messageTemplate,
+                channel: $channel,
+                leadIds: $validLeadIds,
+                createdBy: (int) auth()->id(),
+                settings: [
+                    'timezone' => $data['timezone'],
+                    'business_days' => array_map('intval', $data['businessDays']),
+                    'business_start' => $data['businessStart'],
+                    'business_end' => $data['businessEnd'],
+                    'excluded_dates' => $excluded,
+                    'rate_limit_per_hour' => $data['rateLimitPerHour'],
+                    'min_spacing_seconds' => $data['minSpacingSeconds'],
+                    'scheduled_start_at' => $scheduledStartAt,
+                ],
+            );
+
+            session()->flash('status', 'Proposal campaign berhasil dibuat sebagai draft.');
+
+            return redirect()->route('proposals.show', $campaign);
+        } catch (\Throwable $e) {
+            report($e);
+            $this->addError('form', 'Proposal campaign tidak dapat dibuat. Silakan periksa kembali data dan coba lagi.');
+        }
     }
 
     public function render()
@@ -138,6 +214,7 @@ class Form extends Component
                 ->latest()
                 ->limit(500)
                 ->get(),
+            'selectedCount' => count($this->leadIds),
             'whatsAppEnabled' => (bool) config('proposals.whatsapp.proposal_campaign_enabled'),
         ]);
     }

@@ -8,9 +8,9 @@ use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Enums\PdfStatus;
 use App\Domain\Campaigns\Models\Campaign;
-use App\Domain\Campaigns\Models\CampaignRecipient;
 use App\Domain\Campaigns\Services\BusinessSchedule;
 use App\Jobs\SendProposalDeliveryJob;
+use Illuminate\Support\Facades\DB;
 
 final class ScheduleProposalCampaignAction
 {
@@ -21,62 +21,87 @@ final class ScheduleProposalCampaignAction
 
     public function handle(Campaign $campaign, ?int $userId = null): Campaign
     {
-        if ($campaign->status !== CampaignStatus::Approved) {
-            throw new \InvalidArgumentException('Campaign harus disetujui sebelum dijadwalkan.');
-        }
+        return DB::transaction(function () use ($campaign, $userId): Campaign {
+            $lockedCampaign = Campaign::query()
+                ->lockForUpdate()
+                ->findOrFail($campaign->id);
 
-        if (! $campaign->isApprovedForCurrentRevision()) {
-            throw new \InvalidArgumentException('Approval campaign sudah tidak berlaku untuk revisi ini.');
-        }
-
-        $recipients = $campaign->recipients()
-            ->where('eligibility_status', EligibilityStatus::Eligible)
-            ->where('pdf_status', PdfStatus::Ready)
-            ->whereNotIn('delivery_status', [
-                DeliveryStatus::Sent, DeliveryStatus::Accepted, DeliveryStatus::Delivered,
-                DeliveryStatus::Failed, DeliveryStatus::Skipped, DeliveryStatus::Cancelled,
-            ])
-            ->orderBy('created_at')
-            ->get();
-
-        if ($recipients->isEmpty()) {
-            throw new \InvalidArgumentException('Tidak ada penerima eligible dengan PDF siap untuk dijadwalkan.');
-        }
-
-        $slots = $this->schedule->plan($campaign, $recipients->pluck('id')->all());
-
-        /** @var CampaignRecipient $recipient */
-        foreach ($recipients as $recipient) {
-            $scheduledAt = $slots[$recipient->id] ?? null;
-
-            if ($scheduledAt === null) {
-                continue;
+            if ($lockedCampaign->status !== CampaignStatus::Approved) {
+                throw new \InvalidArgumentException(
+                    'Campaign harus disetujui sebelum dijadwalkan.'
+                );
             }
 
-            $recipient->update([
-                'scheduled_at' => $scheduledAt,
-                'delivery_status' => DeliveryStatus::Scheduled,
-                'skip_reason' => null,
+            if (! $lockedCampaign->isApprovedForCurrentRevision()) {
+                throw new \InvalidArgumentException(
+                    'Approval campaign sudah tidak berlaku untuk revisi ini.'
+                );
+            }
+
+            $recipients = $lockedCampaign->recipients()
+                ->where('eligibility_status', EligibilityStatus::Eligible)
+                ->where('pdf_status', PdfStatus::Ready)
+                ->whereNotIn('delivery_status', [
+                    ...DeliveryStatus::terminal(),
+                    DeliveryStatus::Processing,
+                ])
+                ->orderBy('created_at')
+                ->lockForUpdate()
+                ->get();
+
+            if ($recipients->isEmpty()) {
+                throw new \InvalidArgumentException(
+                    'Tidak ada penerima eligible dengan PDF siap untuk dijadwalkan.'
+                );
+            }
+
+            $slots = $this->schedule->plan(
+                $lockedCampaign,
+                $recipients->pluck('id')->all(),
+            );
+
+            $scheduledRecipients = collect();
+
+            foreach ($recipients as $recipient) {
+                $scheduledAt = $slots[$recipient->id] ?? null;
+
+                if ($scheduledAt === null) {
+                    continue;
+                }
+
+                $recipient->update([
+                    'scheduled_at' => $scheduledAt,
+                    'delivery_status' => DeliveryStatus::Scheduled,
+                    'skip_reason' => null,
+                    'last_error' => null,
+                ]);
+
+                $scheduledRecipients->push($recipient);
+            }
+
+            $lockedCampaign->update([
+                'status' => CampaignStatus::Scheduled,
                 'last_error' => null,
             ]);
-        }
 
-        $campaign->update([
-            'status' => CampaignStatus::Scheduled,
-            'last_error' => null,
-        ]);
+            foreach ($scheduledRecipients as $recipient) {
+                SendProposalDeliveryJob::dispatch($recipient->id)
+                    ->delay($recipient->scheduled_at)
+                    ->afterCommit();
+            }
 
-        $campaign->recipients()
-            ->where('delivery_status', DeliveryStatus::Scheduled)
-            ->each(fn (CampaignRecipient $recipient) => SendProposalDeliveryJob::dispatch($recipient->id)
-                ->delay($recipient->scheduled_at)
-                ->afterCommit());
+            $this->audit->handle(
+                user: $userId,
+                action: 'proposal_campaign.scheduled',
+                subject: $lockedCampaign,
+                after: [
+                    'scheduled' => $scheduledRecipients->count(),
+                    'first_delivery_at' => $scheduledRecipients
+                        ->min('scheduled_at'),
+                ],
+            );
 
-        $this->audit->handle(user: $userId, action: 'proposal_campaign.scheduled', subject: $campaign, after: [
-            'scheduled' => $recipients->count(),
-            'first_delivery_at' => $campaign->recipients()->min('scheduled_at'),
-        ]);
-
-        return $campaign;
+            return $lockedCampaign->refresh();
+        });
     }
 }

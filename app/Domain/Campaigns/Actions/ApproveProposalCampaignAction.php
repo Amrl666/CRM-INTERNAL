@@ -6,6 +6,7 @@ use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Services\ProposalApprovalSnapshot;
+use App\Models\User;
 
 final class ApproveProposalCampaignAction
 {
@@ -20,7 +21,10 @@ final class ApproveProposalCampaignAction
             throw new \InvalidArgumentException('Campaign harus berstatus review sebelum disetujui.');
         }
 
-        if ($campaign->created_by === $approvedBy) {
+        $approver = User::query()->findOrFail($approvedBy);
+
+        if ($campaign->created_by === $approvedBy && ! $approver->hasRole('super_admin')
+        ) {
             throw new \InvalidArgumentException('Pembuat campaign tidak boleh menyetujui campaign sendiri.');
         }
 

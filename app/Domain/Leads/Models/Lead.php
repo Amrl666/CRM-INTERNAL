@@ -2,6 +2,7 @@
 
 namespace App\Domain\Leads\Models;
 
+use App\Domain\Communications\Models\Conversation;
 use App\Domain\Companies\Models\Company;
 use App\Domain\Contacts\Models\Contact;
 use App\Domain\Leads\Enums\LeadStatus;
@@ -44,6 +45,11 @@ class Lead extends Model
     public function contact(): BelongsTo
     {
         return $this->belongsTo(Contact::class);
+    }
+
+    public function conversations(): HasMany
+    {
+        return $this->hasMany(Conversation::class);
     }
 
     public function source(): BelongsTo

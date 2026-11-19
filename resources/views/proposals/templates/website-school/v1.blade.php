@@ -19,12 +19,12 @@
         min-height: 842px;
         background: #fff;
         margin: 40px auto;
-        padding: 40px;
-        padding-bottom: 15px;
+        padding: 40px 40px 15px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         position: relative;
         display: flex;
         flex-direction: column;
+        box-sizing: border-box;
     }
 
     .a4-page .browser-footer {
@@ -47,13 +47,33 @@
         body { background: transparent; }
         .a4-page {
             margin: 0;
-        padding: 40px 40px 15px;
             width: 595px;
             min-height: 842px;
+            padding: 40px 40px 15px;
             box-shadow: none;
+            box-sizing: border-box;
+            zoom: 1.3333333333;
+            break-after: page;
             page-break-after: always;
+            break-inside: avoid;
+            page-break-inside: avoid;
         }
-        .browser-footer { display: none; }
+
+        .a4-page:last-child {
+            break-after: auto;
+            page-break-after: auto;
+        }
+        .browser-footer {
+            display: block !important;
+            margin-top: auto;
+            text-align: center;
+            font-size: 8px;
+            font-weight: 400;
+            color: #999;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+            margin-bottom: 0;
+        }
     }
 
     h1 { font-size: 67.08px; font-weight: 600; line-height: 73px; margin: 0; }

@@ -98,6 +98,7 @@ return [
 
     'waits' => [
         'redis:default' => 60,
+        'redis:imports' => 60,
     ],
 
     /*
@@ -199,7 +200,7 @@ return [
     'defaults' => [
         'supervisor-1' => [
             'connection' => 'redis',
-            'queue' => ['default'],
+            'queue' => ['default', 'imports', 'webhooks', 'communications', 'documents', 'campaigns'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
@@ -207,7 +208,9 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            'timeout' => 60,
+            // Must be greater than the longest job timeout (120s for
+            // SyncGmailMessagesJob) but lower than queue retry_after (150s).
+            'timeout' => (int) env('HORIZON_SUPERVISOR_TIMEOUT', 130),
             'nice' => 0,
         ],
     ],

@@ -5,6 +5,7 @@ namespace App\Domain\Campaigns\Actions;
 use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Models\User;
 
 final class ApproveCampaignAction
 {
@@ -16,7 +17,10 @@ final class ApproveCampaignAction
             throw new \InvalidArgumentException('Campaign belum diajukan untuk approval.');
         }
 
-        if ($campaign->created_by === $approvedBy) {
+        $approver = User::query()->findOrFail($approvedBy);
+
+        if ($campaign->created_by === $approvedBy && ! $approver->hasRole('super_admin')
+        ) {
             throw new \InvalidArgumentException('Pembuat campaign tidak boleh menyetujui campaign sendiri.');
         }
 

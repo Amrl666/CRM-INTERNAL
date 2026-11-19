@@ -6,43 +6,127 @@ use App\Domain\Communications\Contracts\EmailProvider;
 use App\Domain\Communications\DTOs\CommunicationResult;
 use App\Domain\Communications\DTOs\EmailMessageData;
 use App\Domain\Communications\Models\CommunicationAccount;
-use Google\Client as GoogleClient;
+use App\Domain\Communications\Services\GmailAccountAuthenticator;
+use App\Domain\Communications\Services\GmailApiErrorClassifier;
+use App\Domain\Communications\Services\GmailAuthenticationException;
+use Google\Service\Exception as GoogleServiceException;
 use Google\Service\Gmail;
 use Google\Service\Gmail\Draft;
+use Throwable;
 
 final class GmailProvider implements EmailProvider
 {
-    public function __construct(private readonly GoogleClient $client) {}
+    public function __construct(
+        private readonly GmailAccountAuthenticator $authenticator,
+        private readonly GmailApiErrorClassifier $classifier = new GmailApiErrorClassifier,
+    ) {}
 
     public function createDraft(EmailMessageData $message): CommunicationResult
     {
-        $service = $this->service();
+        $account = $this->authenticator->connectedAccount();
 
-        if ($service === null) {
+        if ($account === null) {
             return CommunicationResult::fail('gmail_not_connected');
         }
 
-        $raw = rtrim(strtr(base64_encode($this->mimeMessage($message)), '+/', '-_'), '=');
+        try {
+            $service = $this->authenticator->gmailServiceFor($account);
+        } catch (GmailAuthenticationException $e) {
+            report($e);
 
-        $draft = new Draft;
-        $draft->setMessage((new Gmail\Message)->setRaw($raw));
+            return CommunicationResult::fail('gmail_authentication_failed');
+        } catch (Throwable $e) {
+            report($e);
 
-        $created = $service->users_drafts->create('me', $draft);
+            return CommunicationResult::fail('gmail_authentication_failed');
+        }
 
-        return CommunicationResult::ok((string) $created->getId(), 'draft');
+        try {
+            $raw = rtrim(
+                strtr(base64_encode($this->mimeMessage($message)), '+/', '-_'),
+                '=',
+            );
+
+            $gmailMessage = new Gmail\Message;
+            $gmailMessage->setRaw($raw);
+
+            $draft = new Draft;
+            $draft->setMessage($gmailMessage);
+        } catch (Throwable $e) {
+            report($e);
+
+            return CommunicationResult::fail('gmail_draft_preparation_failed');
+        }
+
+        try {
+            $created = $service->users_drafts->create('me', $draft);
+
+            if (blank($created->getId())) {
+                return CommunicationResult::unknown('gmail_draft_result_missing_id');
+            }
+
+            return CommunicationResult::ok((string) $created->getId(), 'draft');
+        } catch (GoogleServiceException $e) {
+            return $this->handleGoogleApiException(
+                $e,
+                'gmail_draft_outcome_unknown',
+                'gmail_draft_create_failed',
+                $account,
+            );
+        } catch (Throwable $e) {
+            report($e);
+
+            return CommunicationResult::unknown('gmail_draft_outcome_unknown');
+        }
     }
 
     public function sendApprovedDraft(string $draftId): CommunicationResult
     {
-        $service = $this->service();
+        $account = $this->authenticator->connectedAccount();
 
-        if ($service === null) {
+        if ($account === null) {
             return CommunicationResult::fail('gmail_not_connected');
         }
 
-        $sent = $service->users_drafts->send('me', $draftId);
+        try {
+            $service = $this->authenticator->gmailServiceFor($account);
+        } catch (GmailAuthenticationException $e) {
+            report($e);
 
-        return CommunicationResult::ok((string) ($sent->getId() ?? $draftId), 'sent');
+            return CommunicationResult::fail('gmail_authentication_failed');
+        } catch (Throwable $e) {
+            report($e);
+
+            return CommunicationResult::fail('gmail_authentication_failed');
+        }
+
+        try {
+            $draft = new Draft;
+            $draft->setId($draftId);
+
+            $sent = $service->users_drafts->send('me', $draft);
+
+            $messageId = $sent->getId();
+
+            if (blank($messageId)) {
+                return CommunicationResult::unknown('gmail_send_result_missing_id');
+            }
+
+            return CommunicationResult::ok((string) $messageId, 'sent');
+        } catch (GoogleServiceException $e) {
+            return $this->handleGoogleApiException(
+                $e,
+                'gmail_send_outcome_unknown',
+                'gmail_send_failed',
+                $account,
+            );
+        } catch (Throwable $e) {
+            report($e);
+
+            // Gmail may have accepted the request before the transport failed.
+            // Never retry blindly.
+            return CommunicationResult::unknown('gmail_send_outcome_unknown');
+        }
     }
 
     public function getProviderName(): string
@@ -50,20 +134,29 @@ final class GmailProvider implements EmailProvider
         return 'gmail';
     }
 
-    private function service(): ?Gmail
-    {
-        $account = CommunicationAccount::query()
-            ->where('provider', 'gmail')
-            ->where('connection_status', 'connected')
-            ->first();
+    private function handleGoogleApiException(
+        GoogleServiceException $e,
+        string $unknownReason,
+        string $failureReason,
+        CommunicationAccount $account,
+    ): CommunicationResult {
+        $code = (int) $e->getCode();
 
-        if ($account === null || $account->access_token === null) {
-            return null;
+        if ($code === 401 || $this->classifier->requiresReconnect($e)) {
+            $account->update(['connection_status' => 'disconnected']);
+
+            return CommunicationResult::fail('gmail_authorization_failed');
         }
 
-        $this->client->setAccessToken($account->access_token);
+        if ($this->classifier->isRateLimit($e)) {
+            return CommunicationResult::fail('gmail_rate_limited');
+        }
 
-        return new Gmail($this->client);
+        if ($this->classifier->isRetryable($e)) {
+            return CommunicationResult::unknown($unknownReason);
+        }
+
+        return CommunicationResult::fail($failureReason);
     }
 
     private function mimeMessage(EmailMessageData $message): string

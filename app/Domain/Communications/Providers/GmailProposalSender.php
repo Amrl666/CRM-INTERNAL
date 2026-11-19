@@ -6,61 +6,87 @@ use App\Domain\Communications\Contracts\ProposalEmailSender;
 use App\Domain\Communications\DTOs\CommunicationResult;
 use App\Domain\Communications\DTOs\ProposalEmailData;
 use App\Domain\Communications\Models\CommunicationAccount;
-use Google\Client as GoogleClient;
+use App\Domain\Communications\Services\GmailAccountAuthenticator;
+use App\Domain\Communications\Services\GmailApiErrorClassifier;
+use App\Domain\Communications\Services\GmailAuthenticationException;
 use Google\Service\Exception as GoogleServiceException;
-use Google\Service\Gmail;
 use Google\Service\Gmail\Message;
+use Throwable;
 
 final class GmailProposalSender implements ProposalEmailSender
 {
-    public function __construct(private readonly GoogleClient $client) {}
+    public function __construct(
+        private readonly GmailAccountAuthenticator $authenticator,
+        private readonly GmailApiErrorClassifier $classifier = new GmailApiErrorClassifier,
+    ) {}
 
     public function sendProposal(ProposalEmailData $message): CommunicationResult
     {
-        $account = CommunicationAccount::query()
-            ->where('provider', 'gmail')
-            ->where('connection_status', 'connected')
-            ->latest('updated_at')
-            ->first();
+        $account = $this->authenticator->connectedAccount();
 
         if ($account === null) {
             return CommunicationResult::fail('gmail_not_connected');
         }
 
         try {
-            $this->authenticate($account);
-        } catch (\Throwable $e) {
-            $account->update(['connection_status' => 'disconnected']);
+            $service = $this->authenticator->gmailServiceFor($account);
+        } catch (GmailAuthenticationException $e) {
+            report($e);
 
             return CommunicationResult::fail('gmail_token_invalid');
+        } catch (Throwable $e) {
+            report($e);
+
+            return CommunicationResult::fail('gmail_authentication_failed');
         }
 
-        $raw = rtrim(strtr(base64_encode($this->mimeMessage($message, $account)), '+/', '-_'), '=');
+        try {
+            $mime = $this->mimeMessage($message, $account);
+        } catch (Throwable $e) {
+            report($e);
+
+            return CommunicationResult::fail('gmail_message_preparation_failed');
+        }
+
+        $raw = rtrim(
+            strtr(base64_encode($mime), '+/', '-_'),
+            '=',
+        );
 
         try {
-            $sent = (new Gmail($this->client))->users_messages->send('me', new Message(['raw' => $raw]));
+            $sent = $service->users_messages->send(
+                'me',
+                new Message(['raw' => $raw]),
+            );
+
+            if (blank($sent->getId())) {
+                return CommunicationResult::unknown('gmail_send_result_missing_id');
+            }
 
             return CommunicationResult::ok((string) $sent->getId(), 'accepted');
         } catch (GoogleServiceException $e) {
             $code = (int) $e->getCode();
 
-            if ($code === 401 || $code === 403) {
+            if ($code === 401 || $this->classifier->requiresReconnect($e)) {
                 $account->update(['connection_status' => 'disconnected']);
 
                 return CommunicationResult::fail('gmail_authorization_failed');
             }
 
-            if ($code === 429) {
-                return CommunicationResult::fail('gmail_rate_limited', 'failed');
+            if ($this->classifier->isRateLimit($e)) {
+                return CommunicationResult::fail('gmail_rate_limited');
             }
 
-            if ($code >= 500 || $code === 0) {
+            if ($this->classifier->isRetryable($e)) {
                 return CommunicationResult::unknown('gmail_transient_error');
             }
 
             return CommunicationResult::fail('gmail_send_failed');
-        } catch (\Throwable $e) {
-            // A transport timeout may mean Gmail accepted the message. Do not retry blindly.
+        } catch (Throwable $e) {
+            report($e);
+
+            // Gmail may have accepted the request before the transport failed.
+            // Do not retry blindly.
             return CommunicationResult::unknown('gmail_outcome_unknown');
         }
     }
@@ -70,38 +96,10 @@ final class GmailProposalSender implements ProposalEmailSender
         return 'gmail';
     }
 
-    private function authenticate(CommunicationAccount $account): void
-    {
-        $config = config('communications.email.gmail');
-        $this->client->setClientId((string) $config['client_id']);
-        $this->client->setClientSecret((string) $config['client_secret']);
-        $this->client->setAccessToken($account->access_token);
-
-        $expired = $account->token_expires_at !== null && now()->greaterThanOrEqualTo($account->token_expires_at);
-
-        if ($expired || $account->access_token === null) {
-            if ($account->refresh_token === null) {
-                throw new \RuntimeException('Refresh token tidak tersedia.');
-            }
-
-            $token = $this->client->fetchAccessTokenWithRefreshToken($account->refresh_token);
-
-            if (isset($token['error']) || ! isset($token['access_token'])) {
-                throw new \RuntimeException('Refresh token Gmail gagal.');
-            }
-
-            $account->update([
-                'access_token' => $token['access_token'],
-                'token_expires_at' => isset($token['expires_in']) ? now()->addSeconds((int) $token['expires_in']) : null,
-                'connection_status' => 'connected',
-            ]);
-
-            $this->client->setAccessToken($token);
-        }
-    }
-
-    private function mimeMessage(ProposalEmailData $message, CommunicationAccount $account): string
-    {
+    private function mimeMessage(
+        ProposalEmailData $message,
+        CommunicationAccount $account,
+    ): string {
         $boundary = 'crm_'.bin2hex(random_bytes(16));
         $altBoundary = 'crm_alt_'.bin2hex(random_bytes(16));
         $subject = mb_encode_mimeheader($message->subject, 'UTF-8', 'B', "\r\n");
@@ -120,8 +118,14 @@ final class GmailProposalSender implements ProposalEmailSender
         ];
 
         $fromName = config('proposals.gmail.from_name') ?: $account->display_name;
+
         if ($fromName) {
-            $headers[] = 'From: '.mb_encode_mimeheader((string) $fromName, 'UTF-8', 'B', "\r\n").' <'.$account->account_email.'>';
+            $headers[] = 'From: '.mb_encode_mimeheader(
+                (string) $fromName,
+                'UTF-8',
+                'B',
+                "\r\n",
+            ).' <'.$account->account_email.'>';
         }
 
         $body = implode("\r\n", $headers)."\r\n\r\n";

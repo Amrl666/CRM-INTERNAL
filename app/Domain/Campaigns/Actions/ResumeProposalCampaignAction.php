@@ -8,6 +8,7 @@ use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Services\BusinessSchedule;
 use App\Jobs\SendProposalDeliveryJob;
+use Illuminate\Support\Facades\DB;
 
 final class ResumeProposalCampaignAction
 {
@@ -18,41 +19,76 @@ final class ResumeProposalCampaignAction
 
     public function handle(Campaign $campaign, int $userId): Campaign
     {
-        if ($campaign->status !== CampaignStatus::Paused) {
-            throw new \InvalidArgumentException('Campaign tidak sedang dijeda.');
-        }
+        return DB::transaction(function () use ($campaign, $userId): Campaign {
+            $lockedCampaign = Campaign::query()
+                ->lockForUpdate()
+                ->findOrFail($campaign->id);
 
-        if (! $campaign->isApprovedForCurrentRevision()) {
-            throw new \InvalidArgumentException('Approval campaign tidak berlaku. Ajukan approval ulang.');
-        }
+            if ($lockedCampaign->status !== CampaignStatus::Paused) {
+                throw new \InvalidArgumentException(
+                    'Campaign tidak sedang dijeda.'
+                );
+            }
 
-        $recipients = $campaign->recipients()
-            ->whereIn('delivery_status', [DeliveryStatus::Scheduled, DeliveryStatus::Pending, DeliveryStatus::Ready])
-            ->orderBy('created_at')
-            ->get();
+            if (! $lockedCampaign->isApprovedForCurrentRevision()) {
+                throw new \InvalidArgumentException(
+                    'Approval campaign tidak berlaku. Ajukan approval ulang.'
+                );
+            }
 
-        $slots = $this->schedule->plan($campaign, $recipients->pluck('id')->all());
+            $recipients = $lockedCampaign->recipients()
+                ->whereIn('delivery_status', [
+                    DeliveryStatus::Scheduled,
+                    DeliveryStatus::Pending,
+                    DeliveryStatus::Ready,
+                ])
+                ->orderBy('created_at')
+                ->lockForUpdate()
+                ->get();
 
-        foreach ($recipients as $recipient) {
-            $recipient->update([
-                'scheduled_at' => $slots[$recipient->id] ?? null,
-                'delivery_status' => DeliveryStatus::Scheduled,
+            $slots = $this->schedule->plan(
+                $lockedCampaign,
+                $recipients->pluck('id')->all(),
+            );
+
+            $scheduledRecipients = collect();
+
+            foreach ($recipients as $recipient) {
+                $scheduledAt = $slots[$recipient->id] ?? null;
+
+                if ($scheduledAt === null) {
+                    continue;
+                }
+
+                $recipient->update([
+                    'scheduled_at' => $scheduledAt,
+                    'delivery_status' => DeliveryStatus::Scheduled,
+                ]);
+
+                $scheduledRecipients->push($recipient);
+            }
+
+            $lockedCampaign->update([
+                'status' => CampaignStatus::Scheduled,
+                'paused_at' => null,
             ]);
-        }
 
-        $campaign->update([
-            'status' => CampaignStatus::Scheduled,
-            'paused_at' => null,
-        ]);
+            foreach ($scheduledRecipients as $recipient) {
+                SendProposalDeliveryJob::dispatch($recipient->id)
+                    ->delay($recipient->scheduled_at)
+                    ->afterCommit();
+            }
 
-        $recipients->each(fn ($recipient) => SendProposalDeliveryJob::dispatch($recipient->id)
-            ->delay($recipient->scheduled_at)
-            ->afterCommit());
+            $this->audit->handle(
+                user: $userId,
+                action: 'proposal_campaign.resumed',
+                subject: $lockedCampaign,
+                after: [
+                    'rescheduled' => $scheduledRecipients->count(),
+                ],
+            );
 
-        $this->audit->handle(user: $userId, action: 'proposal_campaign.resumed', subject: $campaign, after: [
-            'rescheduled' => $recipients->count(),
-        ]);
-
-        return $campaign;
+            return $lockedCampaign->refresh();
+        });
     }
 }

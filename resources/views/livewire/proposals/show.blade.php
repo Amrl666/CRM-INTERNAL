@@ -1,4 +1,4 @@
-<div class="max-w-6xl mx-auto space-y-6" @if ($polling) wire:poll.5s @endif>
+<div class="space-y-6" @if ($polling) wire:poll.5s @endif>
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <div class="flex items-center gap-3">
@@ -16,28 +16,32 @@
         <div class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">{{ $message }}</div>
     @enderror
 
-    @if ($campaign->channel?->value === 'WHATSAPP')
-        <div class="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Pengiriman WhatsApp proposal memakai kapabilitas terpisah dan hanya berjalan jika administrator mengaktifkan <code>WHATSAPP_PROPOSAL_CAMPAIGN_ENABLED</code>. Mode WhatsApp umum tetap manual.
-        </div>
-    @endif
-
     <div class="flex flex-wrap gap-2">
-        @if (in_array($campaign->status, [App\Domain\Campaigns\Enums\CampaignStatus::Draft, App\Domain\Campaigns\Enums\CampaignStatus::Review], true))
+        @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Draft)
             @can('update', $campaign)
-                <button wire:click="requestApproval" wire:loading.attr="disabled" data-testid="request-approval"
-                    class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                    Ajukan approval
+                <button type="button" wire:click="requestApproval" wire:loading.attr="disabled" wire:target="requestApproval" data-testid="request-approval"
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="requestApproval">Ajukan approval</span>
+                    <span wire:loading wire:target="requestApproval">Mengajukan...</span>
+                </button>
+            @endcan
+
+            @can('approve', App\Domain\Campaigns\Models\Campaign::class)
+                <button type="button" wire:click="submitForReview" wire:loading.attr="disabled" wire:target="submitForReview" data-testid="submit-for-review"
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="submitForReview">Review &amp; Submit</span>
+                    <span wire:loading wire:target="submitForReview">Memproses...</span>
                 </button>
             @endcan
         @endif
 
         @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Review)
             @can('approve', App\Domain\Campaigns\Models\Campaign::class)
-                <button wire:click="approve" wire:confirm="Setujui seluruh snapshot campaign ini?" wire:loading.attr="disabled" data-testid="approve-campaign"
+                <button type="button" wire:click="approve" wire:confirm="Setujui seluruh snapshot campaign ini?" wire:loading.attr="disabled" wire:target="approve" data-testid="approve-campaign"
                     @disabled($isCreator)
-                    class="rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">
-                    Setujui campaign
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="approve">Setujui campaign</span>
+                    <span wire:loading wire:target="approve">Menyetujui...</span>
                 </button>
                 @if ($isCreator)
                     <p class="w-full text-xs text-amber-700">Pembuat campaign tidak dapat menyetujui campaign sendiri. Minta pengguna lain dengan izin approval.</p>
@@ -47,35 +51,51 @@
 
         @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Approved)
             @can('send', App\Domain\Campaigns\Models\Campaign::class)
-                <button wire:click="schedule" wire:confirm="Jadwalkan pengiriman untuk seluruh penerima eligible?" data-testid="schedule-campaign"
-                    class="rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
-                    Jadwalkan pengiriman
+                <button type="button" wire:click="schedule" wire:confirm="Jadwalkan pengiriman untuk seluruh penerima eligible?" data-testid="schedule-campaign"
+                    wire:loading.attr="disabled" wire:target="schedule"
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="schedule">Jadwalkan pengiriman</span>
+                    <span wire:loading wire:target="schedule">Menjadwalkan...</span>
                 </button>
             @endcan
         @endif
 
         @if (in_array($campaign->status, [App\Domain\Campaigns\Enums\CampaignStatus::Scheduled, App\Domain\Campaigns\Enums\CampaignStatus::Running], true))
             @can('send', App\Domain\Campaigns\Models\Campaign::class)
-                <button wire:click="pause" wire:confirm="Jeda semua pengiriman berikutnya?" class="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100">
-                    Jeda campaign
+                <button type="button" wire:click="pause" wire:confirm="Jeda semua pengiriman berikutnya?" wire:loading.attr="disabled" wire:target="pause"
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="pause">Jeda campaign</span>
+                    <span wire:loading wire:target="pause">Menjeda...</span>
                 </button>
             @endcan
         @endif
 
         @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Paused)
             @can('send', App\Domain\Campaigns\Models\Campaign::class)
-                <button wire:click="resume" wire:confirm="Lanjutkan campaign dan jadwalkan ulang sisa pengiriman?" class="rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
-                    Lanjutkan campaign
+                <button type="button" wire:click="resume" wire:confirm="Lanjutkan campaign dan jadwalkan ulang sisa pengiriman?" wire:loading.attr="disabled" wire:target="resume"
+                    class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span wire:loading.remove wire:target="resume">Lanjutkan campaign</span>
+                    <span wire:loading wire:target="resume">Melanjutkan...</span>
                 </button>
             @endcan
         @endif
 
         @if (! in_array($campaign->status, [App\Domain\Campaigns\Enums\CampaignStatus::Completed, App\Domain\Campaigns\Enums\CampaignStatus::Cancelled], true))
             @can('cancel', App\Domain\Campaigns\Models\Campaign::class)
-                <div class="flex items-center gap-2">
-                    <input type="text" wire:model="cancelReason" placeholder="Alasan pembatalan (opsional)" class="rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    <button wire:click="cancel" wire:confirm="Batalkan campaign dan seluruh pengiriman yang tersisa?" class="rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800">
-                        Batalkan campaign
+                <div class="flex flex-wrap items-start gap-2">
+                    <div>
+                        <label for="cancel-reason" class="sr-only">Alasan pembatalan (opsional)</label>
+                        <input id="cancel-reason" type="text" wire:model="cancelReason" maxlength="500" placeholder="Alasan pembatalan (opsional)"
+                            class="w-64 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
+                        @error('cancelReason')
+                            <p class="mt-1 text-xs text-red-600" role="alert">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <button type="button" wire:click="cancel" wire:confirm="Batalkan campaign dan seluruh pengiriman yang tersisa?"
+                        wire:loading.attr="disabled" wire:target="cancel"
+                        class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50">
+                        <span wire:loading.remove wire:target="cancel">Batalkan campaign</span>
+                        <span wire:loading wire:target="cancel">Membatalkan...</span>
                     </button>
                 </div>
             @endcan
@@ -137,10 +157,15 @@
         @if ($preview)
             <div class="mt-4 grid gap-4 md:grid-cols-2">
                 <div class="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subjek</p>
-                    <p class="mt-1 text-sm font-medium text-slate-900">{{ $preview->rendered_subject }}</p>
-                    <p class="mt-4 text-xs font-medium uppercase tracking-wide text-slate-500">Isi teks</p>
-                    <div class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">{{ $preview->rendered_body_text }}</div>
+                    @if ($campaign->channel === App\Domain\Campaigns\Enums\ProposalChannel::WhatsApp)
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Pesan WhatsApp</p>
+                        <div class="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">{{ $preview->rendered_whatsapp }}</div>
+                    @else
+                        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subjek</p>
+                        <p class="mt-1 text-sm font-medium text-slate-900">{{ $preview->rendered_subject }}</p>
+                        <p class="mt-4 text-xs font-medium uppercase tracking-wide text-slate-500">Isi teks</p>
+                        <div class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">{{ $preview->rendered_body_text }}</div>
+                    @endif
                 </div>
                 <div class="rounded-md border border-slate-200 bg-slate-50 p-4">
                     <p class="text-xs font-medium uppercase tracking-wide text-slate-500">PDF proposal</p>
@@ -153,7 +178,7 @@
                 </div>
             </div>
         @else
-            <p class="mt-3 text-sm text-slate-500">Belum ada penerima eligible dengan pesan yang dirender. Jalankan pemeriksaan eligibility dan tunggu PDF selesai.</p>
+            <p class="mt-3 text-sm text-slate-500">Belum ada penerima eligible dengan pesan yang dirender. Eligibility dihitung otomatis saat outreach dibuat dan PDF dibuat setelahnya.</p>
         @endif
     </div>
 

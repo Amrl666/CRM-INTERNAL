@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\CampaignRecipient;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -13,7 +14,7 @@ final class ProposalDocumentController extends Controller
 {
     public function preview(Request $request, Campaign $campaign, CampaignRecipient $recipient): Response
     {
-        $this->authorize('view', $campaign);
+        Gate::authorize('view', $campaign);
         abort_unless($recipient->campaign_id === $campaign->id, 404);
 
         return $this->fileResponse($recipient, false);
@@ -21,7 +22,7 @@ final class ProposalDocumentController extends Controller
 
     public function download(Request $request, Campaign $campaign, CampaignRecipient $recipient): BinaryFileResponse
     {
-        $this->authorize('view', $campaign);
+        Gate::authorize('view', $campaign);
         abort_unless($recipient->campaign_id === $campaign->id, 404);
 
         return $this->fileResponse($recipient, true);

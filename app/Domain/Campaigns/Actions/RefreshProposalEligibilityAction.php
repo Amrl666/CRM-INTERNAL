@@ -3,6 +3,7 @@
 namespace App\Domain\Campaigns\Actions;
 
 use App\Domain\Audit\Actions\RecordAuditAction;
+use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Models\Campaign;
@@ -19,6 +20,12 @@ final class RefreshProposalEligibilityAction
     /** @return array{eligible: int, ineligible: int, reasons: array<string, int>} */
     public function handle(Campaign $campaign, ?int $userId = null): array
     {
+        if ($campaign->status !== CampaignStatus::Draft) {
+            throw new \InvalidArgumentException(
+                'Eligibility hanya dapat diperiksa ulang saat campaign masih Draft.'
+            );
+        }
+
         $eligible = 0;
         $ineligible = 0;
         $reasons = [];
@@ -38,10 +45,24 @@ final class RefreshProposalEligibilityAction
 
                 if ($reason === []) {
                     $eligible++;
-                    $recipient->update([
+
+                    $wasIneligible = $recipient->eligibility_status === EligibilityStatus::Ineligible;
+                    $wasSkipped = $recipient->delivery_status === DeliveryStatus::Skipped;
+
+                    $updates = [
                         'eligibility_status' => EligibilityStatus::Eligible,
                         'eligibility_reason' => null,
-                    ]);
+                    ];
+
+                    if ($wasIneligible && $wasSkipped) {
+                        $updates += [
+                            'delivery_status' => DeliveryStatus::Pending,
+                            'skip_reason' => null,
+                            'last_error' => null,
+                        ];
+                    }
+
+                    $recipient->update($updates);
 
                     return;
                 }
@@ -56,7 +77,11 @@ final class RefreshProposalEligibilityAction
                     'skip_reason' => $message,
                 ]);
 
-                if (! in_array($recipient->delivery_status, [DeliveryStatus::Sent, DeliveryStatus::Accepted, DeliveryStatus::Delivered], true)) {
+                if (in_array($recipient->delivery_status, [
+                    DeliveryStatus::Pending,
+                    DeliveryStatus::Ready,
+                    DeliveryStatus::Skipped,
+                ], true)) {
                     $recipient->update(['delivery_status' => DeliveryStatus::Skipped]);
                 }
             });
