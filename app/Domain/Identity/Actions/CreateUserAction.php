@@ -10,7 +10,7 @@ final class CreateUserAction
     public function __construct(private readonly RecordAuditAction $audit) {}
 
     /**
-     * @param  array{name: string, email: string, password: string, role: string, phone?: string|null, is_active?: bool}  $data
+     * @param  array{name: string, email: string, password: string, role: string, phone?: string|null, position?: string|null, is_active?: bool}  $data
      */
     public function handle(array $data, ?int $createdBy = null): User
     {
@@ -19,6 +19,7 @@ final class CreateUserAction
             'email' => mb_strtolower($data['email']),
             'password' => $data['password'],
             'phone' => $data['phone'] ?? null,
+            'position' => $data['position'] ?? null,
             'is_active' => $data['is_active'] ?? true,
         ]);
 

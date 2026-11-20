@@ -5,7 +5,10 @@ namespace App\Livewire\Leads;
 use App\Domain\Communications\Actions\CreateEmailDraftAction;
 use App\Domain\Communications\Actions\RecordManualWhatsAppInteractionAction;
 use App\Domain\Communications\Actions\SendApprovedEmailAction;
+use App\Domain\Communications\DTOs\EmailMessageData;
 use App\Domain\Communications\Models\CommunicationMessage;
+use App\Domain\Communications\Services\EmailBannerRenderer;
+use App\Domain\Communications\Services\EmailMessageRenderer;
 use App\Domain\Consent\Actions\RecordConsentAction;
 use App\Domain\Consent\Enums\Channel;
 use App\Domain\Consent\Services\CommunicationEligibility;
@@ -36,6 +39,8 @@ class Show extends Component
     public string $emailBody = '';
 
     public string $waSummary = '';
+
+    public ?string $previewMessageId = null;
 
     public string $emailConsent = 'UNKNOWN';
 
@@ -286,6 +291,49 @@ class Show extends Component
             report($e);
             $this->addError('waSummary', 'Interaksi WhatsApp tidak dapat dicatat. Silakan coba lagi.');
         }
+    }
+
+    public function getComposePreviewHtmlProperty(): string
+    {
+        $user = auth()->user();
+
+        return app(EmailMessageRenderer::class)->preview(
+            new EmailMessageData(
+                to: (string) ($this->lead->contact?->normalized_email ?? ''),
+                subject: $this->emailSubject,
+                body: $this->emailBody,
+            ),
+            app(EmailBannerRenderer::class)->dataUri($user?->name, $user?->position),
+        );
+    }
+
+    public function toggleDraftPreview(string $id): void
+    {
+        $this->previewMessageId = $this->previewMessageId === $id ? null : $id;
+    }
+
+    public function getDraftPreviewHtmlProperty(): string
+    {
+        if ($this->previewMessageId === null || $this->lead->contact === null) {
+            return '';
+        }
+
+        $message = CommunicationMessage::find($this->previewMessageId);
+
+        if ($message === null || $message->contact_id !== $this->lead->contact->id) {
+            return '';
+        }
+
+        $sender = User::find($message->sent_by);
+
+        return app(EmailMessageRenderer::class)->preview(
+            new EmailMessageData(
+                to: '',
+                subject: (string) $message->subject,
+                body: (string) $message->body,
+            ),
+            app(EmailBannerRenderer::class)->dataUri($sender?->name, $sender?->position),
+        );
     }
 
     public function render()

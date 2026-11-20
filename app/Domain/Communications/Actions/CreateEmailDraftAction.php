@@ -9,6 +9,7 @@ use App\Domain\Communications\Models\CommunicationMessage;
 use App\Domain\Communications\Services\GmailAccountAuthenticator;
 use App\Domain\Consent\Enums\Channel;
 use App\Domain\Contacts\Models\Contact;
+use App\Models\User;
 
 final class CreateEmailDraftAction
 {
@@ -26,11 +27,14 @@ final class CreateEmailDraftAction
         ?string $campaignId = null,
     ): CommunicationMessage {
         $account = $this->gmailAuthenticator->connectedAccount();
+        $sender = User::find($createdBy);
 
         $result = $this->emailProvider->createDraft(new EmailMessageData(
             to: (string) $contact->normalized_email,
             subject: $subject,
             body: $body,
+            senderName: $sender?->name,
+            senderPosition: $sender?->position,
         ));
 
         $message = CommunicationMessage::create([

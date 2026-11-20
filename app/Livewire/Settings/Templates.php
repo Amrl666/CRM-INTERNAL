@@ -5,6 +5,9 @@ namespace App\Livewire\Settings;
 use App\Domain\Campaigns\Models\EmailTemplate;
 use App\Domain\Campaigns\Models\MessageTemplate;
 use App\Domain\Campaigns\Services\MessagePersonalization;
+use App\Domain\Communications\DTOs\EmailMessageData;
+use App\Domain\Communications\Services\EmailBannerRenderer;
+use App\Domain\Communications\Services\EmailMessageRenderer;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -214,8 +217,19 @@ class Templates extends Component
     {
         $variables = $this->sampleVariables();
         $this->previewSubject = $this->personalization()->subject($this->emailSubject, $variables);
-        $this->previewBody = $this->personalization()->html($this->emailBody, $variables);
         $this->previewUnknownVariables = $this->personalization()->unknownVariables($this->emailBody);
+
+        $this->previewBody = app(EmailMessageRenderer::class)->preview(
+            new EmailMessageData(
+                to: '',
+                subject: $this->previewSubject,
+                body: $this->personalization()->text($this->emailBody, $variables),
+            ),
+            app(EmailBannerRenderer::class)->dataUri(
+                auth()->user()?->name,
+                auth()->user()?->position,
+            ),
+        );
     }
 
     public function render()
