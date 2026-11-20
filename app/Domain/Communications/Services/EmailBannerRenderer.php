@@ -16,23 +16,24 @@ final class EmailBannerRenderer
     /** @var array<string, string> */
     private static array $cache = [];
 
+    /** @var array<string, string> */
+    private static array $urlCache = [];
+
     /** JPEG bytes of the banner with the sender name and position drawn in. */
     public function jpeg(?string $name, ?string $position): string
     {
         $name = trim((string) ($name ?? ''));
         $position = trim((string) ($position ?? ''));
-        $path = (string) (config('communications.email_banner.path')
-            ?: public_path('images/email-footer-banner.jpg'));
-        $cacheKey = $path.'|'.$name.'|'.$position;
+        $cacheKey = $this->cacheKey($name, $position);
 
         if (isset(self::$cache[$cacheKey])) {
             return self::$cache[$cacheKey];
         }
 
-        $image = @imagecreatefromjpeg($path);
+        $image = @imagecreatefromjpeg($this->sourcePath());
 
         if ($image === false) {
-            $fallback = @file_get_contents($path);
+            $fallback = @file_get_contents($this->sourcePath());
 
             return self::$cache[$cacheKey] = $fallback === false ? '' : $fallback;
         }
@@ -79,5 +80,51 @@ final class EmailBannerRenderer
         $jpeg = $this->jpeg($name, $position);
 
         return $jpeg === '' ? '' : 'data:image/jpeg;base64,'.base64_encode($jpeg);
+    }
+
+    /** Short storage URL for CRM previews (avoids sending a large data URI in the Livewire state). */
+    public function url(?string $name, ?string $position): string
+    {
+        $name = trim((string) ($name ?? ''));
+        $position = trim((string) ($position ?? ''));
+        $cacheKey = $this->cacheKey($name, $position);
+
+        if (isset(self::$urlCache[$cacheKey])) {
+            return self::$urlCache[$cacheKey];
+        }
+
+        $jpeg = $this->jpeg($name, $position);
+
+        if ($jpeg === '') {
+            return self::$urlCache[$cacheKey] = '';
+        }
+
+        $directory = storage_path('app/public/email-banners');
+
+        if (! is_dir($directory) && ! @mkdir($directory, 0755, true) && ! is_dir($directory)) {
+            return self::$urlCache[$cacheKey] = '';
+        }
+
+        $filename = sha1($cacheKey).'.jpg';
+        $file = $directory.DIRECTORY_SEPARATOR.$filename;
+
+        if (! is_file($file) && @file_put_contents($file, $jpeg, LOCK_EX) === false) {
+            return self::$urlCache[$cacheKey] = '';
+        }
+
+        $version = filemtime($file) ?: 0;
+
+        return self::$urlCache[$cacheKey] = asset('storage/email-banners/'.$filename.'?v='.$version);
+    }
+
+    private function sourcePath(): string
+    {
+        return (string) (config('communications.email_banner.path')
+            ?: public_path('images/email-footer-banner.jpg'));
+    }
+
+    private function cacheKey(string $name, string $position): string
+    {
+        return $this->sourcePath().'|'.$name.'|'.$position;
     }
 }

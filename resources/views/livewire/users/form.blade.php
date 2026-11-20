@@ -57,7 +57,7 @@
             @error('position')
                 <p id="position-error" class="mt-1 text-sm text-red-600" role="alert">{{ $message }}</p>
             @enderror
-            <p class="mt-1 text-xs text-slate-500">Digunakan sebagai tanda tangan pada footer email draft.</p>
+            <p class="mt-1 text-xs text-slate-500">Digunakan sebagai teks pada footer banner email draft.</p>
         </div>
 
         <div>

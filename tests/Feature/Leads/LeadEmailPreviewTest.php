@@ -33,7 +33,8 @@ it('shows the inline email preview with the rendered banner on lead detail', fun
         ->set('emailBody', 'Isi pesan untuk Budi.')
         ->assertSee('Pratinjau email')
         ->assertSee('Isi pesan untuk Budi.')
-        ->assertSee('data:image/jpeg;base64,', false);
+        ->assertSee('Footer banner')
+        ->assertSee('/storage/email-banners/', false);
 });
 
 it('shows the rendered body of an existing draft from the lead message list', function () {
@@ -65,5 +66,6 @@ it('shows the rendered body of an existing draft from the lead message list', fu
         ->call('toggleDraftPreview', $draft->id)
         ->assertSee('Sembunyikan')
         ->assertSee('Isi draft lama.')
-        ->assertSee('data:image/jpeg;base64,', false);
+        ->assertSee('Footer banner')
+        ->assertSee('/storage/email-banners/', false);
 });

@@ -14,7 +14,7 @@ use Livewire\Component;
 #[Layout('layouts.sidebar', ['heading' => 'Template'])]
 class Templates extends Component
 {
-    public string $tab = 'message';
+    public string $tab = 'email';
 
     public ?string $editingMessageId = null;
 
@@ -41,6 +41,8 @@ class Templates extends Component
     public ?string $previewSubject = null;
 
     public string $previewBody = '';
+
+    public string $previewBannerUrl = '';
 
     public ?string $previewWhatsappBody = null;
 
@@ -88,6 +90,7 @@ class Templates extends Component
     {
         $this->previewSubject = null;
         $this->previewBody = '';
+        $this->previewBannerUrl = '';
         $this->previewWhatsappBody = null;
         $this->previewUnknownVariables = [];
     }
@@ -219,16 +222,18 @@ class Templates extends Component
         $this->previewSubject = $this->personalization()->subject($this->emailSubject, $variables);
         $this->previewUnknownVariables = $this->personalization()->unknownVariables($this->emailBody);
 
+        $this->previewBannerUrl = app(EmailBannerRenderer::class)->url(
+            auth()->user()?->name,
+            auth()->user()?->position,
+        );
+
         $this->previewBody = app(EmailMessageRenderer::class)->preview(
             new EmailMessageData(
                 to: '',
                 subject: $this->previewSubject,
                 body: $this->personalization()->text($this->emailBody, $variables),
             ),
-            app(EmailBannerRenderer::class)->dataUri(
-                auth()->user()?->name,
-                auth()->user()?->position,
-            ),
+            '',
         );
     }
 
