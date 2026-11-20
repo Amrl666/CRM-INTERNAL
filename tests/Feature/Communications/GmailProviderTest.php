@@ -4,11 +4,13 @@
 use App\Domain\Communications\DTOs\EmailMessageData;
 use App\Domain\Communications\Models\CommunicationAccount;
 use App\Domain\Communications\Providers\GmailProvider;
+use App\Domain\Communications\Services\EmailBannerRenderer;
 use App\Domain\Communications\Services\GmailAccountAuthenticator;
 use Google\Client as GoogleClient;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -209,4 +211,68 @@ it('disconnects the Gmail account when approved draft sending receives unauthori
         ->and($result->status)->toBe('failed')
         ->and($result->reason)->toBe('gmail_authorization_failed')
         ->and($account->fresh()->connection_status)->toBe('disconnected');
+});
+
+function gmailProviderCapturedMime(array &$history, EmailMessageData $message): string
+{
+    $handler = HandlerStack::create(new MockHandler([
+        gmailProviderTestResponse(200, [
+            'id' => 'draft-with-banner',
+            'message' => ['id' => 'message-with-banner'],
+        ]),
+    ]));
+    $handler->push(Middleware::history($history));
+
+    $client = new GoogleClient;
+    $client->setHttpClient(new HttpClient(['handler' => $handler]));
+    $provider = new GmailProvider(new GmailAccountAuthenticator($client));
+
+    $result = $provider->createDraft($message);
+
+    expect($result->success)->toBeTrue()
+        ->and($history)->toHaveCount(1);
+
+    $payload = json_decode((string) $history[0]['request']->getBody(), true, flags: JSON_THROW_ON_ERROR);
+    $encoded = (string) data_get($payload, 'message.raw');
+    $encoded .= str_repeat('=', (4 - strlen($encoded) % 4) % 4);
+
+    return (string) base64_decode(strtr($encoded, '-_', '+/'));
+}
+
+it('appends the rendered footer banner to a Gmail draft', function () {
+    gmailProviderTestAccount();
+
+    $history = [];
+    $mime = gmailProviderCapturedMime($history, new EmailMessageData(
+        to: 'recipient@example.test',
+        subject: 'Test email',
+        body: 'Halo',
+        senderName: 'Dimas Aulia',
+        senderPosition: 'CEO & Founder',
+    ));
+    $compact = str_replace(["\r\n", "\n"], '', $mime);
+    $banner = app(EmailBannerRenderer::class)->jpeg('Dimas Aulia', 'CEO & Founder');
+
+    expect($mime)->toContain('multipart/related')
+        ->and($mime)->toContain('Content-ID: <email-footer-banner>')
+        ->and($mime)->toContain('Content-Type: image/jpeg')
+        ->and($compact)->toContain(base64_encode($banner));
+});
+
+it('still creates a Gmail draft when the footer banner is missing', function () {
+    gmailProviderTestAccount();
+    config(['communications.email_banner.path' => public_path('images/does-not-exist.jpg')]);
+
+    $history = [];
+    $mime = gmailProviderCapturedMime($history, new EmailMessageData(
+        to: 'recipient@example.test',
+        subject: 'Test email',
+        body: 'Halo',
+        senderName: 'Dimas Aulia',
+        senderPosition: 'CEO & Founder',
+    ));
+
+    expect($mime)->toContain('multipart/related')
+        ->and($mime)->not->toContain('Content-ID: <email-footer-banner>')
+        ->and(str_replace(["\r\n", "\n"], '', $mime))->toContain(base64_encode('Halo'));
 });

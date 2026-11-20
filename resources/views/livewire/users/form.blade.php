@@ -49,6 +49,18 @@
         </div>
 
         <div>
+            <label for="position" class="block text-sm font-medium text-slate-700">Jabatan</label>
+            <input id="position" type="text" wire:model="position" autocomplete="organization-title"
+                placeholder="Contoh: CEO & Founder"
+                @error('position') aria-invalid="true" aria-describedby="position-error" @enderror
+                class="mt-1 block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 @error('position') border-red-400 @else border-slate-300 @enderror"/>
+            @error('position')
+                <p id="position-error" class="mt-1 text-sm text-red-600" role="alert">{{ $message }}</p>
+            @enderror
+            <p class="mt-1 text-xs text-slate-500">Digunakan sebagai tanda tangan pada footer email draft.</p>
+        </div>
+
+        <div>
             <label for="role" class="block text-sm font-medium text-slate-700">
                 Role <span class="text-red-600" aria-hidden="true">*</span>
             </label>

@@ -126,6 +126,7 @@
                 <label class="block text-sm font-medium text-slate-700 mb-1">Body</label>
                 <textarea wire:model="emailBody" rows="6" class="w-full rounded-md border-slate-300 text-sm font-mono"></textarea>
                 @error('emailBody') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                <p class="mt-1 text-xs text-slate-500">Preview menampilkan email lengkap termasuk footer banner dan tanda tangan pengirim.</p>
             </div>
             <div class="flex gap-2">
                 <button type="button" wire:click="saveEmail" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Simpan</button>

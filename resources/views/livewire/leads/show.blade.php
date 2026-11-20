@@ -195,6 +195,16 @@
                                 <p id="email-body-error" class="text-xs text-red-600" role="alert">{{ $message }}</p>
                             @enderror
 
+                            <div class="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="email-compose-preview">
+                                <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Pratinjau email</p>
+                                <div class="max-h-72 overflow-auto rounded-md border border-slate-200 bg-white p-3 text-sm">
+                                    {!! $this->composePreviewHtml !!}
+                                </div>
+                                <p class="mt-2 text-xs text-slate-500">
+                                    Tampilan ini mengikuti isi pesan dan footer banner yang akan dibuat di Gmail.
+                                </p>
+                            </div>
+
                             @error('emailReasons')
                                 <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">{{ $message }}</p>
                             @enderror
@@ -257,8 +267,21 @@
                     @if ($messages->isNotEmpty())
                         <div class="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
                             @foreach ($messages as $message)
-                                <div wire:key="message-{{ $message->id }}">
-                                    {{ $message->channel }} &middot; {{ $message->status }}@if ($message->subject) &middot; {{ $message->subject }} @endif
+                                <div wire:key="message-{{ $message->id }}" class="py-1">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span>{{ $message->channel }} &middot; {{ $message->status }}@if ($message->subject) &middot; {{ $message->subject }} @endif</span>
+                                        @if ($message->channel === 'EMAIL')
+                                            <button type="button" wire:click="toggleDraftPreview('{{ $message->id }}')"
+                                                class="shrink-0 text-blue-700 hover:underline">
+                                                {{ $previewMessageId === $message->id ? 'Sembunyikan' : 'Lihat isi' }}
+                                            </button>
+                                        @endif
+                                    </div>
+                                    @if ($previewMessageId === $message->id && $this->draftPreviewHtml !== '')
+                                        <div class="mt-2 rounded-md border border-slate-200 bg-white p-3 text-sm">
+                                            {!! $this->draftPreviewHtml !!}
+                                        </div>
+                                    @endif
                                 </div>
                             @endforeach
                         </div>
