@@ -6,11 +6,16 @@ use App\Domain\Communications\Models\CommunicationAccount;
 use Google\Client as GoogleClient;
 use Google\Service\Oauth2;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 final class GmailOAuthService
 {
-    private const REQUIRED_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+    private const REQUIRED_SCOPES = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
 
     public function __construct(
         private readonly GoogleClient $client,
@@ -35,7 +40,7 @@ final class GmailOAuthService
             throw new RuntimeException('Google tidak berhasil memberikan access token Gmail.');
         }
 
-        $this->assertReadScopeGranted($token);
+        $this->assertRequiredScopesGranted($token);
 
         $this->client->setAccessToken($token);
 
@@ -91,12 +96,65 @@ final class GmailOAuthService
     }
 
     /**
-     * Gmail Inbox requires read access. Google may grant a narrower scope than
-     * requested, so never mark the account fully connected without it.
+     * Disconnect a Gmail account from this application.
+     *
+     * Local credentials are always removed. Google-side revocation is
+     * best-effort: a network or configuration failure must not leave the
+     * account connected locally. The account row, synced messages, and the
+     * history cursor are deliberately preserved.
+     */
+    public function disconnect(CommunicationAccount $account): bool
+    {
+        if ($account->provider !== 'gmail') {
+            throw new RuntimeException('Akun ini bukan akun Gmail.');
+        }
+
+        $token = filled($account->refresh_token)
+            ? (string) $account->refresh_token
+            : (string) $account->access_token;
+
+        DB::transaction(function () use ($account): void {
+            $account->forceFill([
+                'access_token' => null,
+                'refresh_token' => null,
+                'token_expires_at' => null,
+                'connection_status' => 'disconnected',
+            ])->save();
+        });
+
+        if ($token === '') {
+            return false;
+        }
+
+        try {
+            $this->configure();
+            $revoked = $this->client->revokeToken($token);
+
+            if ($revoked !== true) {
+                Log::warning('Google did not confirm Gmail token revocation; local credentials were still removed.', [
+                    'account_id' => $account->id,
+                ]);
+
+                return false;
+            }
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('Gmail token revocation failed; local credentials were still removed.', [
+                'account_id' => $account->id,
+                'exception' => $e::class,
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * Gmail Inbox and proposal delivery require read and send access.
      *
      * @param  array<string, mixed>  $token
      */
-    private function assertReadScopeGranted(array $token): void
+    private function assertRequiredScopesGranted(array $token): void
     {
         $scope = $token['scope']
             ?? $this->client->getOAuth2Service()->getGrantedScope();
@@ -114,9 +172,15 @@ final class GmailOAuthService
             fn ($value): bool => is_string($value) && $value !== '',
         ));
 
-        if (! in_array(self::REQUIRED_READ_SCOPE, $granted, true)) {
+        $missing = array_values(array_diff(self::REQUIRED_SCOPES, $granted));
+
+        if ($missing !== []) {
+            Log::warning('Gmail OAuth missing required scopes.', [
+                'missing_scopes' => $missing,
+            ]);
+
             throw new RuntimeException(
-                'Izin baca Gmail (gmail.readonly) belum diberikan. Silakan hubungkan ulang dan setujui akses baca Gmail.',
+                'Izin Gmail belum lengkap. Prospectra membutuhkan akses Gmail membaca dan mengirim. Hubungkan ulang dan setujui seluruh izin.',
             );
         }
     }
@@ -138,6 +202,6 @@ final class GmailOAuthService
         $this->client->setRedirectUri($config['redirect_uri']);
         $this->client->setScopes($config['scopes']);
         $this->client->setAccessType('offline');
-        $this->client->setPrompt('consent');
+        $this->client->setPrompt('consent select_account');
     }
 }

@@ -6,6 +6,7 @@ return [
         'default' => env('EMAIL_PROVIDER', 'gmail'),
         'gmail' => [
             'primary_email' => env('GMAIL_PRIMARY_EMAIL', 'enigmativebusiness@gmail.com'),
+            'from_email' => env('GMAIL_FROM_EMAIL', 'hello@enigmative.web.id'),
             'client_id' => env('GOOGLE_CLIENT_ID'),
             'client_secret' => env('GOOGLE_CLIENT_SECRET'),
             'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
@@ -29,6 +30,24 @@ return [
                 'cache_store' => env('GMAIL_SYNC_CACHE_STORE') ?: null,
             ],
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Proposal outbound email
+    |--------------------------------------------------------------------------
+    |
+    | Proposals are sent through Brevo SMTP whenever SMTP credentials are
+    | present. Gmail stays connected for inbox reads and reply sync only.
+    | Set PROPOSAL_EMAIL_TRANSPORT=gmail to fall back to the Gmail API.
+    |
+    */
+    'proposal_email' => [
+        'transport' => env('PROPOSAL_EMAIL_TRANSPORT')
+            ?: ((env('EMAIL_PROVIDER', 'gmail') !== 'fake' && env('BREVO_SMTP_USERNAME')) ? 'brevo' : null),
+        'from_email' => env('PROPOSAL_FROM_EMAIL', env('GMAIL_FROM_EMAIL', 'hello@enigmative.web.id')),
+        'from_name' => env('PROPOSAL_FROM_NAME', env('PROPOSAL_GMAIL_FROM_NAME', 'Enigma Collective Studio')),
+        'reply_to' => env('PROPOSAL_REPLY_TO', env('PROPOSAL_FROM_EMAIL', env('GMAIL_FROM_EMAIL', 'hello@enigmative.web.id'))),
     ],
 
     'whatsapp' => [

@@ -161,7 +161,13 @@ final class GmailProvider implements EmailProvider
 
     private function mimeMessage(EmailMessageData $message): string
     {
+        $fromEmail = config(
+            'communications.email.gmail.from_email',
+            'hello@enigmative.web.id',
+        );
+
         $headers = [
+            'From: Enigma Collective Studio <'.$fromEmail.'>',
             'To: '.$message->to,
             'Subject: '.$message->subject,
             'MIME-Version: 1.0',

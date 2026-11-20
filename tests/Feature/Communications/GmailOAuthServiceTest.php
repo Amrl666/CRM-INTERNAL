@@ -45,7 +45,7 @@ function gmailOAuthTestResponse(int $status, array $body): Response
 function gmailOAuthTestScope(string $extra = ''): string
 {
     return trim(
-        'https://www.googleapis.com/auth/gmail.readonly openid email profile '.$extra,
+        'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send openid email profile '.$extra,
     );
 }
 
@@ -199,7 +199,7 @@ it('rejects OAuth connection from a non-primary Gmail account without changing a
         ->and(CommunicationAccount::query()->count())->toBe(1);
 });
 
-it('rejects OAuth callback when gmail.readonly was not granted', function () {
+it('rejects OAuth callback when required Gmail scopes were not granted', function () {
     $service = gmailOAuthTestService([
         gmailOAuthTestResponse(200, [
             'access_token' => 'new-access-token',
@@ -210,7 +210,23 @@ it('rejects OAuth callback when gmail.readonly was not granted', function () {
     ]);
 
     expect(fn () => $service->handleCallback('test-authorization-code'))
-        ->toThrow(RuntimeException::class, 'gmail.readonly');
+        ->toThrow(RuntimeException::class, 'Izin Gmail belum lengkap');
+
+    expect(CommunicationAccount::query()->count())->toBe(0);
+});
+
+it('rejects OAuth callback when Gmail send scope was not granted', function () {
+    $service = gmailOAuthTestService([
+        gmailOAuthTestResponse(200, [
+            'access_token' => 'new-access-token',
+            'refresh_token' => 'new-refresh-token',
+            'expires_in' => 3600,
+            'scope' => 'https://www.googleapis.com/auth/gmail.readonly openid email profile',
+        ]),
+    ]);
+
+    expect(fn () => $service->handleCallback('test-authorization-code'))
+        ->toThrow(RuntimeException::class, 'Izin Gmail belum lengkap');
 
     expect(CommunicationAccount::query()->count())->toBe(0);
 });
@@ -236,10 +252,47 @@ it('keeps a secondary Gmail account connected when primary scope is incomplete',
     ]);
 
     expect(fn () => $service->handleCallback('primary-account-code'))
-        ->toThrow(RuntimeException::class, 'gmail.readonly');
+        ->toThrow(RuntimeException::class, 'Izin Gmail belum lengkap');
 
     expect($secondary->fresh()->connection_status)->toBe('connected')
         ->and($secondary->fresh()->access_token)->toBe('secondary-access-token')
+        ->and(CommunicationAccount::query()->count())->toBe(1);
+});
+
+it('reconnects a disconnected account without resetting its history cursor', function () {
+    $existing = CommunicationAccount::create([
+        'provider' => 'gmail',
+        'account_email' => 'hello@example.test',
+        'display_name' => 'Primary Gmail',
+        'access_token' => null,
+        'refresh_token' => null,
+        'token_expires_at' => null,
+        'connection_status' => 'disconnected',
+        'gmail_history_id' => 'history-77',
+    ]);
+
+    $service = gmailOAuthTestService([
+        gmailOAuthTestResponse(200, [
+            'access_token' => 'reconnect-access-token',
+            'refresh_token' => 'reconnect-refresh-token',
+            'expires_in' => 3600,
+            'scope' => gmailOAuthTestScope(),
+            'token_type' => 'Bearer',
+        ]),
+        gmailOAuthTestResponse(200, [
+            'email' => 'hello@example.test',
+            'name' => 'Primary Gmail',
+            'verified_email' => true,
+        ]),
+    ]);
+
+    $account = $service->handleCallback('reconnect-code');
+
+    expect($account->id)->toBe($existing->id)
+        ->and($account->connection_status)->toBe('connected')
+        ->and($account->access_token)->toBe('reconnect-access-token')
+        ->and($account->refresh_token)->toBe('reconnect-refresh-token')
+        ->and($account->gmail_history_id)->toBe('history-77')
         ->and(CommunicationAccount::query()->count())->toBe(1);
 });
 

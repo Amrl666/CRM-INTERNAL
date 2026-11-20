@@ -14,6 +14,7 @@ use App\Domain\Communications\Fakes\FakeProposalEmailSender;
 use App\Domain\Communications\Fakes\FakeProposalWhatsAppSender;
 use App\Domain\Communications\Fakes\FakeWhatsAppProvider;
 use App\Domain\Communications\Listeners\ReleaseGmailSyncOnUniqueJobSkipped;
+use App\Domain\Communications\Providers\BrevoProposalSender;
 use App\Domain\Communications\Providers\EvolutionClient;
 use App\Domain\Communications\Providers\EvolutionProposalSender;
 use App\Domain\Communications\Providers\GmailProposalSender;
@@ -69,9 +70,14 @@ class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(ProposalEmailSender::class, function () {
-            return config('communications.email.default') === 'gmail'
-                ? new GmailProposalSender($this->app->make(GmailAccountAuthenticator::class))
-                : new FakeProposalEmailSender;
+            $transport = config('communications.proposal_email.transport')
+                ?: (config('communications.email.default') === 'gmail' ? 'gmail' : null);
+
+            return match ($transport) {
+                'brevo' => $this->app->make(BrevoProposalSender::class),
+                'gmail' => new GmailProposalSender($this->app->make(GmailAccountAuthenticator::class)),
+                default => new FakeProposalEmailSender,
+            };
         });
 
         $this->app->singleton(ProposalWhatsAppSender::class, function () {

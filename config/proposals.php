@@ -26,6 +26,6 @@ return [
     ],
 
     'gmail' => [
-        'from_name' => env('PROPOSAL_GMAIL_FROM_NAME', null),
+        'from_name' => env('PROPOSAL_GMAIL_FROM_NAME', env('PROPOSAL_FROM_NAME', 'Enigma Collective Studio')),
     ],
 ];

@@ -202,21 +202,69 @@ it('returns failed when proposal attachment cannot be read', function () {
         ->and($result->reason)->toBe('gmail_message_preparation_failed');
 });
 
-it('disconnects the Gmail account when proposal sending receives unauthorized', function () {
+it('refreshes the token and retries once when proposal sending receives unauthorized', function () {
     $account = createGmailProposalTestAccount();
 
     $attachment = tempnam(sys_get_temp_dir(), 'gmail-proposal-');
     file_put_contents($attachment, '%PDF-1.4 test attachment');
 
     try {
-        $sender = createGmailProposalTestSender(
-            array_fill(0, 6, createGmailApiResponse(401, [
+        $sender = createGmailProposalTestSender([
+            createGmailApiResponse(401, [
                 'error' => [
                     'code' => 401,
                     'message' => 'Invalid Credentials',
                 ],
-            ])),
-        );
+            ]),
+            createGmailApiResponse(200, [
+                'access_token' => 'refreshed-access-token',
+                'expires_in' => 3600,
+                'scope' => 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send',
+            ]),
+            createGmailApiResponse(200, [
+                'id' => 'gmail-message-after-refresh',
+                'threadId' => 'gmail-thread-after-refresh',
+            ]),
+        ]);
+
+        $result = $sender->sendProposal(createGmailProposalTestData($attachment));
+
+        expect($result->success)->toBeTrue()
+            ->and($result->status)->toBe('accepted')
+            ->and($result->providerMessageId)->toBe('gmail-message-after-refresh')
+            ->and($account->fresh()->connection_status)->toBe('connected')
+            ->and($account->fresh()->access_token)->toBe('refreshed-access-token');
+    } finally {
+        @unlink($attachment);
+    }
+});
+
+it('disconnects the Gmail account when unauthorized persists after refresh', function () {
+    $account = createGmailProposalTestAccount();
+
+    $attachment = tempnam(sys_get_temp_dir(), 'gmail-proposal-');
+    file_put_contents($attachment, '%PDF-1.4 test attachment');
+
+    try {
+        $sender = createGmailProposalTestSender([
+            createGmailApiResponse(401, [
+                'error' => [
+                    'code' => 401,
+                    'message' => 'Invalid Credentials',
+                ],
+            ]),
+            createGmailApiResponse(200, [
+                'access_token' => 'refreshed-access-token',
+                'expires_in' => 3600,
+                'scope' => 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send',
+            ]),
+            createGmailApiResponse(401, [
+                'error' => [
+                    'code' => 401,
+                    'message' => 'Invalid Credentials',
+                ],
+            ]),
+        ]);
 
         $result = $sender->sendProposal(createGmailProposalTestData($attachment));
 

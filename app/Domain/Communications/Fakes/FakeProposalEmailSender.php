@@ -22,4 +22,14 @@ final class FakeProposalEmailSender implements ProposalEmailSender
     {
         return 'fake';
     }
+
+    public function getSenderEmail(): ?string
+    {
+        return null;
+    }
+
+    public function getSenderName(): ?string
+    {
+        return null;
+    }
 }
