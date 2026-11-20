@@ -21,6 +21,8 @@ use App\Domain\Campaigns\Models\ProposalDeliveryAttempt;
 use App\Domain\Campaigns\Models\ProposalSenderSetting;
 use App\Domain\Campaigns\Models\ProposalTemplate;
 use App\Domain\Campaigns\Services\BusinessSchedule;
+use App\Domain\Communications\Contracts\ProposalEmailSender;
+use App\Domain\Communications\Fakes\FakeProposalEmailSender;
 use App\Domain\Consent\Enums\Channel as ConsentChannel;
 use App\Domain\Consent\Enums\ConsentStatus;
 use App\Domain\Consent\Services\ConsentService;
@@ -412,6 +414,51 @@ it('re-rechecks eligibility immediately before delivery send attempt', function 
         ->and($result->reason)->toBe('ineligible');
     $recipient->refresh();
     expect($recipient->delivery_status)->toBe(DeliveryStatus::Skipped);
+});
+
+it('uses the outreach creator name and position for the email banner', function () {
+    $creator = User::factory()->create([
+        'name' => 'Rina Utami',
+        'position' => 'Sales Lead',
+    ]);
+    $approver = User::factory()->create();
+    $lead = Lead::factory()->create();
+    app(ConsentService::class)->record($lead->contact, ConsentChannel::Email, ConsentStatus::Granted, 'form');
+
+    $campaign = app(CreateProposalCampaignAction::class)->handle(
+        'Banner Sender',
+        ProposalTemplate::firstWhere('slug', 'test-template'),
+        MessageTemplate::where('channel', 'EMAIL')->first(),
+        ProposalChannel::Email,
+        [$lead->id],
+        $creator->id,
+        [
+            'timezone' => 'Asia/Jakarta',
+            'business_days' => [1, 2, 3, 4, 5, 6, 7],
+            'business_start' => '00:00',
+            'business_end' => '23:59',
+        ],
+    );
+    ($this->prepareCampaignForApproval)($campaign);
+    app(RequestProposalApprovalAction::class)->handle($campaign, $creator->id);
+    app(ApproveProposalCampaignAction::class)->handle($campaign, $approver->id);
+
+    $campaign->update(['status' => CampaignStatus::Scheduled]);
+    $recipient = $campaign->recipients()->first();
+    $recipient->update([
+        'delivery_status' => DeliveryStatus::Scheduled,
+        'scheduled_at' => now()->subMinute(),
+    ]);
+
+    $fakeEmailSender = new FakeProposalEmailSender;
+    $this->app->instance(ProposalEmailSender::class, $fakeEmailSender);
+
+    $result = app(SendProposalDeliveryAction::class)->handle($recipient);
+
+    expect($result->success)->toBeTrue()
+        ->and($fakeEmailSender->sent)->toHaveCount(1)
+        ->and($fakeEmailSender->sent[0]->senderName)->toBe('Rina Utami')
+        ->and($fakeEmailSender->sent[0]->senderPosition)->toBe('Sales Lead');
 });
 
 it('uses idempotency key to prevent duplicate deliveries', function () {
