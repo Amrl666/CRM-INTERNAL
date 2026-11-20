@@ -141,7 +141,7 @@ it('redirects to settings after successful Gmail authorization', function () {
             'access_token' => 'test-access-token',
             'refresh_token' => 'test-refresh-token',
             'expires_in' => 3600,
-            'scope' => 'https://www.googleapis.com/auth/gmail.readonly openid email profile',
+            'scope' => 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send openid email profile',
             'token_type' => 'Bearer',
         ]),
         gmailOAuthControllerGoogleResponse(200, [
@@ -174,7 +174,7 @@ it('redirects to settings after successful Gmail authorization', function () {
         ->and(CommunicationAccount::query()->count())->toBe(1);
 });
 
-it('does not connect the account when Gmail read scope is missing', function () {
+it('does not connect the account when required Gmail scopes are missing', function () {
     $admin = gmailOAuthControllerAdmin();
 
     gmailOAuthControllerMockGoogleClient([

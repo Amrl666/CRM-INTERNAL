@@ -187,6 +187,24 @@ final class GmailSyncStatus
     }
 
     /**
+     * Clear all per-account synchronization state.
+     *
+     * Used when an administrator disconnects the Gmail account. There is no
+     * run ownership check here: the explicit disconnect always wins over a
+     * marker left behind by a crashed or in-flight job.
+     */
+    public function reset(string $accountId): bool
+    {
+        return $this->withStateLock($accountId, function () use ($accountId): bool {
+            foreach (['running', 'failure', 'resync', 'last_attempt'] as $suffix) {
+                $this->cache()->forget($this->key($accountId, $suffix));
+            }
+
+            return true;
+        }) ?? false;
+    }
+
+    /**
      * Record a failure only when the caller owns the active run.
      */
     public function markFailed(

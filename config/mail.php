@@ -49,6 +49,20 @@ return [
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 
+        // Dedicated outbound relay for proposal emails. Kept separate from the
+        // default mailer so transactional mail and Gmail inbox sync do not
+        // change behaviour when the proposal transport is switched.
+        'brevo' => [
+            'transport' => 'smtp',
+            'scheme' => env('BREVO_SMTP_SCHEME'),
+            'host' => env('BREVO_SMTP_HOST', 'smtp-relay.brevo.com'),
+            'port' => (int) env('BREVO_SMTP_PORT', 587),
+            'username' => env('BREVO_SMTP_USERNAME'),
+            'password' => env('BREVO_SMTP_PASSWORD'),
+            'timeout' => (int) env('BREVO_SMTP_TIMEOUT', 30),
+            'local_domain' => env('BREVO_SMTP_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+        ],
+
         'ses' => [
             'transport' => 'ses',
         ],

@@ -239,6 +239,14 @@ final class SendProposalDeliveryAction
             ? $this->emailSender->getProviderName()
             : $this->whatsAppSender->getProviderName();
 
+        $senderEmail = $campaign->channel === ProposalChannel::Email
+            ? $this->emailSender->getSenderEmail()
+            : null;
+
+        $senderName = $campaign->channel === ProposalChannel::Email
+            ? $this->emailSender->getSenderName()
+            : null;
+
         ProposalDeliveryAttempt::create([
             'campaign_recipient_id' => $recipient->id,
             'channel' => (string) $campaign->channel?->value,
@@ -262,6 +270,8 @@ final class SendProposalDeliveryAction
                 'provider' => $provider,
                 'provider_message_id' => $result->providerMessageId,
                 'status' => $result->status === 'sent' ? 'sent' : 'accepted',
+                'sender_email' => $senderEmail,
+                'sender_name' => $senderName,
                 'sent_at' => now(),
             ]);
 
@@ -300,7 +310,7 @@ final class SendProposalDeliveryAction
             return $result;
         }
 
-        $retryable = in_array($result->reason, ['gmail_rate_limited', 'evolution_rate_limited'], true);
+        $retryable = in_array($result->reason, ['gmail_rate_limited', 'brevo_rate_limited', 'evolution_rate_limited'], true);
 
         if ($retryable && $attemptNumber < 3) {
             $recipient->update([

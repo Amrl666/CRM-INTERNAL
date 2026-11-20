@@ -10,4 +10,8 @@ interface ProposalEmailSender
     public function sendProposal(ProposalEmailData $message): CommunicationResult;
 
     public function getProviderName(): string;
+
+    public function getSenderEmail(): ?string;
+
+    public function getSenderName(): ?string;
 }

@@ -166,6 +166,10 @@ final class GmailProvider implements EmailProvider
 
     private function mimeMessage(EmailMessageData $message): string
     {
+        $fromEmail = config(
+            'communications.email.gmail.from_email',
+            'hello@enigmative.web.id',
+        );
         $boundary = 'crm_'.bin2hex(random_bytes(16));
         $altBoundary = 'crm_alt_'.bin2hex(random_bytes(16));
         $cid = (string) config('communications.email_banner.cid', 'email-footer-banner');
@@ -176,6 +180,7 @@ final class GmailProvider implements EmailProvider
         }
 
         $headers = [
+            'From: Enigma Collective Studio <'.$fromEmail.'>',
             'To: '.$message->to,
             'Subject: '.$message->subject,
             'MIME-Version: 1.0',
