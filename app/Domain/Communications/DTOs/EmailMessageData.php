@@ -9,5 +9,7 @@ final class EmailMessageData
         public readonly string $subject,
         public readonly string $body,
         public readonly ?string $replyTo = null,
+        public readonly ?string $senderName = null,
+        public readonly ?string $senderPosition = null,
     ) {}
 }

@@ -60,4 +60,11 @@ return [
             'webhook_secret' => env('EVOLUTION_WEBHOOK_SECRET'),
         ],
     ],
+
+    'email_banner' => [
+        // Absolute path to the JPEG appended to every Gmail draft.
+        // Leave empty to use public/images/email-footer-banner.jpg.
+        'path' => env('EMAIL_BANNER_PATH'),
+        'cid' => 'email-footer-banner',
+    ],
 ];

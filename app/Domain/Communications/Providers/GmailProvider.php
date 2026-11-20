@@ -6,12 +6,15 @@ use App\Domain\Communications\Contracts\EmailProvider;
 use App\Domain\Communications\DTOs\CommunicationResult;
 use App\Domain\Communications\DTOs\EmailMessageData;
 use App\Domain\Communications\Models\CommunicationAccount;
+use App\Domain\Communications\Services\EmailBannerRenderer;
+use App\Domain\Communications\Services\EmailMessageRenderer;
 use App\Domain\Communications\Services\GmailAccountAuthenticator;
 use App\Domain\Communications\Services\GmailApiErrorClassifier;
 use App\Domain\Communications\Services\GmailAuthenticationException;
 use Google\Service\Exception as GoogleServiceException;
 use Google\Service\Gmail;
 use Google\Service\Gmail\Draft;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 final class GmailProvider implements EmailProvider
@@ -19,6 +22,8 @@ final class GmailProvider implements EmailProvider
     public function __construct(
         private readonly GmailAccountAuthenticator $authenticator,
         private readonly GmailApiErrorClassifier $classifier = new GmailApiErrorClassifier,
+        private readonly EmailMessageRenderer $renderer = new EmailMessageRenderer,
+        private readonly EmailBannerRenderer $bannerRenderer = new EmailBannerRenderer,
     ) {}
 
     public function createDraft(EmailMessageData $message): CommunicationResult
@@ -165,19 +170,52 @@ final class GmailProvider implements EmailProvider
             'communications.email.gmail.from_email',
             'hello@enigmative.web.id',
         );
+        $boundary = 'crm_'.bin2hex(random_bytes(16));
+        $altBoundary = 'crm_alt_'.bin2hex(random_bytes(16));
+        $cid = (string) config('communications.email_banner.cid', 'email-footer-banner');
+        $banner = $this->bannerRenderer->jpeg($message->senderName, $message->senderPosition);
+
+        if ($banner === '') {
+            Log::warning('gmail: email footer banner tidak ditemukan');
+        }
 
         $headers = [
             'From: Enigma Collective Studio <'.$fromEmail.'>',
             'To: '.$message->to,
             'Subject: '.$message->subject,
             'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
+            'Content-Type: multipart/related; type="multipart/alternative"; boundary="'.$boundary.'"',
         ];
 
         if ($message->replyTo !== null) {
             $headers[] = 'Reply-To: '.$message->replyTo;
         }
 
-        return implode("\r\n", $headers)."\r\n\r\n".$message->body;
+        $mime = implode("\r\n", $headers)."\r\n\r\n";
+        $mime .= '--'.$boundary."\r\n";
+        $mime .= 'Content-Type: multipart/alternative; boundary="'.$altBoundary.'"'."\r\n\r\n";
+        $mime .= '--'.$altBoundary."\r\n";
+        $mime .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        $mime .= chunk_split(base64_encode($this->renderer->plainText($message)), 76, "\r\n");
+        $mime .= '--'.$altBoundary."\r\n";
+        $mime .= "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        $mime .= chunk_split(base64_encode($this->renderer->html(
+            $message,
+            $banner === '' ? '' : 'cid:'.$cid,
+        )), 76, "\r\n");
+        $mime .= '--'.$altBoundary."--\r\n";
+
+        if ($banner !== '') {
+            $mime .= '--'.$boundary."\r\n";
+            $mime .= 'Content-Type: image/jpeg; name="'.$cid.'.jpg"'."\r\n";
+            $mime .= "Content-Transfer-Encoding: base64\r\n";
+            $mime .= 'Content-ID: <'.$cid.'>'."\r\n";
+            $mime .= 'Content-Disposition: inline; filename="'.$cid.'.jpg"'."\r\n\r\n";
+            $mime .= chunk_split(base64_encode($banner), 76, "\r\n");
+        }
+
+        $mime .= '--'.$boundary."--\r\n";
+
+        return $mime;
     }
 }

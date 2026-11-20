@@ -23,6 +23,8 @@ class Form extends Component
 
     public string $phone = '';
 
+    public string $position = '';
+
     public string $role = 'sales_agent';
 
     public bool $is_active = true;
@@ -39,6 +41,7 @@ class Form extends Component
             $this->name = $user->name;
             $this->email = $user->email;
             $this->phone = (string) $user->phone;
+            $this->position = (string) $user->position;
             $this->is_active = $user->is_active;
             $this->role = $user->getRoleNames()->first() ?? 'viewer';
         } else {
@@ -55,6 +58,7 @@ class Form extends Component
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:320', Rule::unique('users', 'email')->ignore($this->userId)],
             'phone' => ['nullable', 'string', 'max:20'],
+            'position' => ['nullable', 'string', 'max:120'],
             'role' => ['required', Rule::in(Role::pluck('name')->all())],
             'is_active' => ['boolean'],
             'password' => [$this->userId ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
@@ -80,6 +84,7 @@ class Form extends Component
                     'password' => $this->password,
                     'role' => $this->role,
                     'phone' => $this->phone !== '' ? trim($this->phone) : null,
+                    'position' => $this->position !== '' ? trim($this->position) : null,
                     'is_active' => $this->is_active,
                 ], auth()->id());
 
@@ -91,12 +96,13 @@ class Form extends Component
             }
 
             DB::transaction(function () use ($user, $assignRole, $audit): void {
-                $before = $user->only(['name', 'email', 'phone', 'is_active']);
+                $before = $user->only(['name', 'email', 'phone', 'position', 'is_active']);
 
                 $user->update([
                     'name' => trim($this->name),
                     'email' => mb_strtolower($this->email),
                     'phone' => $this->phone !== '' ? trim($this->phone) : null,
+                    'position' => $this->position !== '' ? trim($this->position) : null,
                     'is_active' => $this->is_active,
                 ]);
 
@@ -113,7 +119,7 @@ class Form extends Component
                     action: 'user.updated',
                     subject: $user,
                     before: $before,
-                    after: $user->only(['name', 'email', 'phone', 'is_active']),
+                    after: $user->only(['name', 'email', 'phone', 'position', 'is_active']),
                 );
             });
 
