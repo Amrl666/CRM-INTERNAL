@@ -18,6 +18,7 @@ final class ProposalMail extends Mailable
         public readonly string $fromName,
         public readonly string $replyToEmail,
         public readonly string $messageId,
+        public readonly string $bannerBytes = '',
     ) {}
 
     public function envelope(): Envelope
@@ -45,6 +46,7 @@ final class ProposalMail extends Mailable
             with: [
                 'htmlBody' => $this->proposal->htmlBody,
                 'textBody' => $this->proposal->textBody,
+                'bannerBytes' => $this->bannerBytes,
             ],
         );
     }

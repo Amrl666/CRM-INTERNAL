@@ -5,6 +5,7 @@ namespace App\Domain\Communications\Providers;
 use App\Domain\Communications\Contracts\ProposalEmailSender;
 use App\Domain\Communications\DTOs\CommunicationResult;
 use App\Domain\Communications\DTOs\ProposalEmailData;
+use App\Domain\Communications\Services\EmailBannerRenderer;
 use App\Mail\ProposalMail;
 use Illuminate\Contracts\Mail\Factory as MailFactory;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +18,7 @@ final class BrevoProposalSender implements ProposalEmailSender
 {
     public function __construct(
         private readonly MailFactory $mailer,
+        private readonly ?EmailBannerRenderer $bannerRenderer = null,
     ) {}
 
     public function sendProposal(ProposalEmailData $message): CommunicationResult
@@ -46,12 +48,20 @@ final class BrevoProposalSender implements ProposalEmailSender
         $messageId = $this->generateMessageId($fromEmail);
 
         try {
+            $bannerRenderer = $this->bannerRenderer ?? app(EmailBannerRenderer::class);
+
+            $bannerBytes = $bannerRenderer->jpeg(
+                $message->senderName,
+                $message->senderPosition,
+            );
+
             $this->mailer->mailer('brevo')->send(new ProposalMail(
                 proposal: $message,
                 fromEmail: $fromEmail,
                 fromName: (string) ($this->getSenderName() ?? ''),
                 replyToEmail: $this->replyToEmail($fromEmail),
                 messageId: $messageId,
+                bannerBytes: $bannerBytes,
             ));
         } catch (TransportExceptionInterface $e) {
             return $this->classifyTransportError($e);
