@@ -9,8 +9,11 @@ use Illuminate\Contracts\Mail\Mailer;
 use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Mailer\Exception\TransportException;
 
-function brevoProposalTestData(string $attachmentPath): ProposalEmailData
-{
+function brevoProposalTestData(
+    string $attachmentPath,
+    ?string $senderName = 'Amirul',
+    ?string $senderPosition = 'Proposal Specialist',
+): ProposalEmailData {
     return new ProposalEmailData(
         to: 'lead@example.test',
         subject: 'Proposal website sekolah',
@@ -18,6 +21,8 @@ function brevoProposalTestData(string $attachmentPath): ProposalEmailData
         textBody: 'Halo lead, kami lampirkan proposal.',
         attachmentPath: $attachmentPath,
         attachmentFilename: 'Proposal-Website.pdf',
+        senderName: $senderName,
+        senderPosition: $senderPosition,
     );
 }
 
@@ -182,15 +187,27 @@ it('builds an smtp message with alias headers and the pdf attachment', function 
 
     $email = $messages->first()->getOriginalMessage();
 
+    $attachments = $email->getAttachments();
+    $pdf = collect($attachments)->first(
+        fn ($part): bool => $part->getFilename() === 'Proposal-Website.pdf',
+    );
+    $banner = collect($attachments)->first(
+        fn ($part): bool => $part->getFilename() === 'email-footer-banner.jpg',
+    );
+
     expect($email->getFrom()[0]->getAddress())->toBe('hello@enigmative.web.id')
         ->and($email->getTo()[0]->getAddress())->toBe('lead@example.test')
         ->and($email->getReplyTo()[0]->getAddress())->toBe('hello@enigmative.web.id')
         ->and($email->getSubject())->toBe('Proposal website sekolah')
         ->and($email->getHeaders()->get('Message-ID')->getBodyAsString())
         ->toBe('<'.$result->providerMessageId.'>')
-        ->and($email->getAttachments())->toHaveCount(1)
-        ->and($email->getAttachments()[0]->getFilename())->toBe('Proposal-Website.pdf')
-        ->and($email->getAttachments()[0]->getContentType())->toBe('application/pdf')
+        ->and($attachments)->toHaveCount(2)
+        ->and($pdf)->not->toBeNull()
+        ->and($pdf->getContentType())->toBe('application/pdf')
+        ->and($banner)->not->toBeNull()
+        ->and($banner->getDisposition())->toBe('inline')
+        ->and($banner->getMediaType())->toBe('image')
         ->and($email->getHtmlBody())->toContain('kami lampirkan proposal')
+        ->and($email->getHtmlBody())->toContain('cid:')
         ->and($email->getTextBody())->toContain('kami lampirkan proposal');
 });

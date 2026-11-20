@@ -12,5 +12,7 @@ final class ProposalEmailData
         public readonly string $attachmentPath,
         public readonly string $attachmentFilename,
         public readonly string $attachmentMime = 'application/pdf',
+        public readonly ?string $senderName = null,
+        public readonly ?string $senderPosition = null,
     ) {}
 }

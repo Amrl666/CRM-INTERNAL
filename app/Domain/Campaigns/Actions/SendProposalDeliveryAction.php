@@ -11,6 +11,7 @@ use App\Domain\Campaigns\Enums\ProposalChannel;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\CampaignRecipient;
 use App\Domain\Campaigns\Models\ProposalDeliveryAttempt;
+use App\Domain\Campaigns\Models\ProposalSenderSetting;
 use App\Domain\Campaigns\Services\BusinessSchedule;
 use App\Domain\Communications\Contracts\ProposalEmailSender;
 use App\Domain\Communications\Contracts\ProposalWhatsAppSender;
@@ -19,6 +20,7 @@ use App\Domain\Communications\DTOs\ProposalEmailData;
 use App\Domain\Communications\DTOs\ProposalWhatsAppData;
 use App\Domain\Communications\Models\CommunicationMessage;
 use App\Domain\Consent\Services\CommunicationEligibility;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -215,6 +217,20 @@ final class SendProposalDeliveryAction
         $recipient->refresh();
         $absolutePath = Storage::disk($disk)->path((string) $recipient->attachment_path);
 
+        // The banner follows the same renderer as Gmail drafts. Prospectra
+        // keeps the sender name in proposal settings and the position in the
+        // user who last updated that setting, so no new DB column is needed.
+        $senderSetting = $campaign->channel === ProposalChannel::Email
+            ? ProposalSenderSetting::query()
+                ->where('is_active', true)
+                ->latest('updated_at')
+                ->first()
+            : null;
+        $bannerSenderName = $senderSetting?->sender_name;
+        $bannerSenderPosition = $senderSetting !== null && filled($senderSetting->updated_by)
+            ? User::query()->whereKey($senderSetting->updated_by)->value('position')
+            : null;
+
         try {
             $result = $campaign->channel === ProposalChannel::Email
                 ? $this->emailSender->sendProposal(new ProposalEmailData(
@@ -224,6 +240,8 @@ final class SendProposalDeliveryAction
                     textBody: (string) $recipient->rendered_body_text,
                     attachmentPath: $absolutePath,
                     attachmentFilename: (string) ($recipient->attachment_filename ?: basename($absolutePath)),
+                    senderName: $bannerSenderName,
+                    senderPosition: $bannerSenderPosition,
                 ))
                 : $this->whatsAppSender->sendProposalDocument(new ProposalWhatsAppData(
                     to: (string) $recipient->contact->phone_e164,
