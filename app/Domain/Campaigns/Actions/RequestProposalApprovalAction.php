@@ -4,17 +4,17 @@ namespace App\Domain\Campaigns\Actions;
 
 use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
-use App\Domain\Campaigns\Enums\EligibilityStatus;
-use App\Domain\Campaigns\Enums\PdfStatus;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Services\AudiencePreview;
 use App\Domain\Campaigns\Services\ProposalApprovalSnapshot;
+use App\Domain\Campaigns\Support\AudienceFilter;
 use App\Models\User;
+use InvalidArgumentException;
 
 final class RequestProposalApprovalAction
 {
     public function __construct(
-        private readonly RefreshProposalEligibilityAction $eligibility,
-        private readonly RenderProposalMessageAction $renderMessage,
+        private readonly AudiencePreview $preview,
         private readonly ProposalApprovalSnapshot $snapshot,
         private readonly RecordAuditAction $audit,
     ) {}
@@ -22,32 +22,32 @@ final class RequestProposalApprovalAction
     public function handle(Campaign $campaign, int $userId): Campaign
     {
         if (! in_array($campaign->status, [CampaignStatus::Draft, CampaignStatus::Review], true)) {
-            throw new \InvalidArgumentException('Campaign tidak dapat diajukan untuk approval pada status ini.');
+            throw new InvalidArgumentException('Campaign tidak dapat diajukan untuk approval pada status ini.');
+        }
+
+        if (! $campaign->isProposal()) {
+            throw new InvalidArgumentException('Action ini hanya untuk campaign proposal.');
         }
 
         $user = User::query()->findOrFail($userId);
-        $summary = $this->eligibility->handle($campaign, $userId);
+        $filter = AudienceFilter::fromArray($campaign->audience_filters ?? []);
+        $summary = $this->preview->estimate($campaign, $filter, fresh: true);
 
-        if ($summary['eligible'] === 0) {
-            throw new \InvalidArgumentException('Tidak ada penerima eligible. Perbaiki consent/suppression terlebih dahulu.');
+        $eligible = 0;
+        foreach ($summary['channels'] as $counts) {
+            $eligible += $counts['eligible'];
         }
 
-        $notReady = $campaign->recipients()
-            ->where('eligibility_status', EligibilityStatus::Eligible)
-            ->where('pdf_status', '!=', PdfStatus::Ready)
-            ->count();
-
-        if ($notReady > 0) {
-            throw new \InvalidArgumentException("{$notReady} penerima eligible belum memiliki PDF siap. Tunggu proses dokumen selesai.");
+        if ($eligible === 0) {
+            throw new InvalidArgumentException('Tidak ada estimasi penerima eligible untuk filter/saluran ini.');
         }
 
-        $campaign->recipients()
-            ->where('eligibility_status', EligibilityStatus::Eligible)
-            ->with(['contact.company', 'lead.source'])
-            ->each(fn ($recipient) => $this->renderMessage->handle($recipient));
+        if ($campaign->channel?->includesWhatsApp() && ! config('proposals.whatsapp.proposal_campaign_enabled')) {
+            throw new InvalidArgumentException('Campaign proposal WhatsApp belum diaktifkan administrator.');
+        }
 
         if ($user->hasRole('super_admin')) {
-            $approvalSnapshot = $this->snapshot->build($campaign);
+            $approvalSnapshot = $this->snapshot->build($campaign, $summary);
 
             $campaign->update([
                 'status' => CampaignStatus::Approved,
@@ -63,7 +63,7 @@ final class RequestProposalApprovalAction
                 subject: $campaign,
                 after: [
                     'revision' => $campaign->revision,
-                    'recipients' => count($approvalSnapshot['recipients']),
+                    'estimated_recipients' => $eligible,
                     'channel' => $campaign->channel?->value,
                 ],
             );
@@ -73,17 +73,11 @@ final class RequestProposalApprovalAction
 
         $campaign->update(['status' => CampaignStatus::Review]);
 
-        $this->audit->handle(
-            user: $userId,
-            action: 'proposal_campaign.approval_requested',
-            subject: $campaign,
-            after: [
-                'eligible' => $summary['eligible'],
-                'ineligible' => $summary['ineligible'],
-                'reasons' => $summary['reasons'],
-                'revision' => $campaign->revision,
-            ],
-        );
+        $this->audit->handle(user: $userId, action: 'proposal_campaign.approval_requested', subject: $campaign, after: [
+            'estimated_recipients' => $eligible,
+            'channels' => $summary['channels'],
+            'revision' => $campaign->revision,
+        ]);
 
         return $campaign->refresh();
     }

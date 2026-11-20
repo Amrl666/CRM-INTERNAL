@@ -7,7 +7,14 @@ use App\Domain\Campaigns\Enums\ProposalChannel;
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\MessageTemplate;
 use App\Domain\Campaigns\Models\ProposalTemplate;
+use App\Domain\Campaigns\Services\AudiencePreview;
+use App\Domain\Campaigns\Support\AudienceFilter;
+use App\Domain\Companies\Models\Company;
+use App\Domain\Leads\Enums\LeadStatus;
+use App\Domain\Leads\Models\ImportBatch;
 use App\Domain\Leads\Models\Lead;
+use App\Domain\Leads\Models\LeadSource;
+use App\Domain\Leads\Models\Tag;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
@@ -22,10 +29,46 @@ class Form extends Component
 
     public string $message_template_id = '';
 
+    public string $whatsapp_message_template_id = '';
+
     public string $channel = 'EMAIL';
 
+    public string $audienceMode = 'filter';
+
     /** @var string[] */
-    public array $leadIds = [];
+    public array $leadStatuses = [];
+
+    /** @var string[] */
+    public array $sourceIds = [];
+
+    /** @var string[] */
+    public array $importBatchIds = [];
+
+    /** @var string[] */
+    public array $industries = [];
+
+    /** @var string[] */
+    public array $cities = [];
+
+    /** @var string[] */
+    public array $countryCodes = [];
+
+    /** @var string[] */
+    public array $tagIds = [];
+
+    public string $tagMatch = 'any';
+
+    public string $emailAvailability = 'any';
+
+    public string $whatsappAvailability = 'any';
+
+    public string $priorOutreach = 'any';
+
+    /** @var string[] */
+    public array $manualLeadIds = [];
+
+    /** @var array<string, mixed>|null */
+    public ?array $audiencePreview = null;
 
     public string $timezone = 'Asia/Jakarta';
 
@@ -52,43 +95,65 @@ class Form extends Component
         $presets = (string) request()->query('leads', '');
         $presetIds = collect(explode(',', $presets))
             ->map(fn ($id) => trim((string) $id))
-            ->filter(fn ($id) => $id !== '')
+            ->filter()
             ->unique()
             ->values()
             ->all();
 
         if ($presetIds !== []) {
-            $eligiblePresets = Lead::query()
+            $this->audienceMode = 'manual';
+            $this->manualLeadIds = Lead::query()
                 ->visibleTo(auth()->user())
                 ->active()
                 ->whereNotNull('contact_id')
                 ->whereIn('id', $presetIds)
                 ->pluck('id')
                 ->all();
-
-            $this->leadIds = $eligiblePresets;
         }
     }
 
     public function updatedChannel(): void
     {
         $this->message_template_id = '';
+        $this->whatsapp_message_template_id = '';
     }
 
-    public function selectAllEligible(): void
+    public function filterArray(): array
     {
-        $this->leadIds = Lead::query()
-            ->visibleTo(auth()->user())
-            ->active()
-            ->whereNotNull('contact_id')
-            ->with('contact')
-            ->latest()
-            ->limit(500)
-            ->get()
-            ->map(fn (Lead $lead) => (string) $lead->id)
-            ->all();
+        return [
+            'version' => 1,
+            'mode' => $this->audienceMode,
+            'lead_statuses' => $this->leadStatuses,
+            'source_ids' => $this->sourceIds,
+            'import_batch_ids' => $this->importBatchIds,
+            'industries' => $this->industries,
+            'cities' => $this->cities,
+            'country_codes' => $this->countryCodes,
+            'tag_ids' => $this->tagIds,
+            'tag_match' => $this->tagMatch,
+            'email_availability' => $this->emailAvailability,
+            'whatsapp_availability' => $this->whatsappAvailability,
+            'prior_outreach' => $this->priorOutreach,
+            'manual_lead_ids' => $this->manualLeadIds,
+        ];
+    }
 
-        $this->dispatch('notify', message: 'Semua lead dalam daftar dipilih. Konsultasikan consent sebelum mengirim.', type: 'info');
+    public function calculatePreview(AudiencePreview $preview): void
+    {
+        $campaign = new Campaign([
+            'channel' => ProposalChannel::tryFrom($this->channel) ?? ProposalChannel::Email,
+            'timezone' => $this->timezone,
+            'rate_limit_per_hour' => $this->rateLimitPerHour,
+            'min_spacing_seconds' => $this->minSpacingSeconds,
+            'business_start' => $this->businessStart,
+            'business_end' => $this->businessEnd,
+        ]);
+
+        $this->audiencePreview = $preview->estimate(
+            $campaign,
+            AudienceFilter::fromArray($this->filterArray()),
+            fresh: true,
+        );
     }
 
     public function save(CreateProposalCampaignAction $action)
@@ -98,8 +163,7 @@ class Form extends Component
             'proposal_template_id' => ['required', 'uuid', 'exists:proposal_templates,id'],
             'message_template_id' => ['required', 'uuid', 'exists:message_templates,id'],
             'channel' => ['required', Rule::enum(ProposalChannel::class)],
-            'leadIds' => ['required', 'array', 'min:1'],
-            'leadIds.*' => ['uuid', 'exists:leads,id'],
+            'audienceMode' => ['required', Rule::in(['filter', 'manual'])],
             'timezone' => ['required', 'timezone'],
             'businessDays' => ['required', 'array', 'min:1'],
             'businessDays.*' => ['integer', 'between:1,7'],
@@ -113,31 +177,40 @@ class Form extends Component
 
         $channel = ProposalChannel::from($data['channel']);
 
-        if ($channel === ProposalChannel::WhatsApp && ! config('proposals.whatsapp.proposal_campaign_enabled')) {
+        if ($channel->includesWhatsApp() && ! config('proposals.whatsapp.proposal_campaign_enabled')) {
             $this->addError('channel', 'Campaign proposal WhatsApp belum diaktifkan administrator.');
 
             return;
         }
 
         $messageTemplate = MessageTemplate::findOrFail($data['message_template_id']);
-        if ($messageTemplate->channel !== $channel->value) {
-            $this->addError('message_template_id', 'Template pesan tidak sesuai dengan channel yang dipilih.');
+        $whatsappTemplate = null;
+
+        if ($channel === ProposalChannel::Both) {
+            if ($this->whatsapp_message_template_id === '') {
+                $this->addError('whatsapp_message_template_id', 'Pilih template WhatsApp untuk campaign BOTH.');
+
+                return;
+            }
+
+            $whatsappTemplate = MessageTemplate::findOrFail($this->whatsapp_message_template_id);
+            if ($whatsappTemplate->channel !== 'WHATSAPP') {
+                $this->addError('whatsapp_message_template_id', 'Template WhatsApp tidak valid.');
+
+                return;
+            }
+
+            if ($messageTemplate->channel !== 'EMAIL') {
+                $this->addError('message_template_id', 'Template Email tidak valid.');
+
+                return;
+            }
+        } elseif ($channel === ProposalChannel::WhatsApp && $messageTemplate->channel !== 'WHATSAPP') {
+            $this->addError('message_template_id', 'Template pesan tidak sesuai channel yang dipilih.');
 
             return;
-        }
-
-        $leadIds = array_values(array_unique($data['leadIds']));
-
-        $validLeadIds = Lead::query()
-            ->visibleTo(auth()->user())
-            ->active()
-            ->whereNotNull('contact_id')
-            ->whereIn('id', $leadIds)
-            ->pluck('id')
-            ->all();
-
-        if (count($validLeadIds) !== count($leadIds)) {
-            $this->addError('leadIds', 'Sebagian lead yang dipilih tidak valid, sudah diarsipkan, atau tidak memiliki kontak.');
+        } elseif ($channel === ProposalChannel::Email && $messageTemplate->channel !== 'EMAIL') {
+            $this->addError('message_template_id', 'Template pesan tidak sesuai channel yang dipilih.');
 
             return;
         }
@@ -156,7 +229,6 @@ class Form extends Component
             }
 
             $parsed = Carbon::createFromFormat('Y-m-d', $date);
-
             if ($parsed === false || $parsed->format('Y-m-d') !== $date) {
                 $this->addError('excludedDates', "Tanggal libur {$date} tidak valid.");
 
@@ -165,11 +237,7 @@ class Form extends Component
         }
 
         $scheduledStartAt = filled($data['scheduledStartAt'] ?? null)
-            ? Carbon::createFromFormat(
-                'Y-m-d\TH:i',
-                $data['scheduledStartAt'],
-                $data['timezone']
-            )->utc()
+            ? Carbon::createFromFormat('Y-m-d\TH:i', $data['scheduledStartAt'], $data['timezone'])->utc()
             : null;
 
         try {
@@ -178,9 +246,11 @@ class Form extends Component
                 proposalTemplate: ProposalTemplate::findOrFail($data['proposal_template_id']),
                 messageTemplate: $messageTemplate,
                 channel: $channel,
-                leadIds: $validLeadIds,
+                audience: $this->filterArray(),
                 createdBy: (int) auth()->id(),
                 settings: [
+                    'whatsapp_message_template_id' => $whatsappTemplate?->id,
+                    'whatsapp_message_template' => $whatsappTemplate,
                     'timezone' => $data['timezone'],
                     'business_days' => array_map('intval', $data['businessDays']),
                     'business_start' => $data['businessStart'],
@@ -192,7 +262,7 @@ class Form extends Component
                 ],
             );
 
-            session()->flash('status', 'Proposal campaign berhasil dibuat sebagai draft.');
+            session()->flash('status', 'Proposal campaign dibuat sebagai draft. Audiens akan ditentukan saat campaign dimulai.');
 
             return redirect()->route('proposals.show', $campaign);
         } catch (\Throwable $e) {
@@ -203,18 +273,22 @@ class Form extends Component
 
     public function render()
     {
+        $channel = ProposalChannel::tryFrom($this->channel) ?? ProposalChannel::Email;
+
         return view('livewire.proposals.form', [
             'proposalTemplates' => ProposalTemplate::active()->orderBy('name')->get(),
-            'messageTemplates' => MessageTemplate::active()->where('channel', $this->channel)->orderBy('name')->get(),
-            'leads' => Lead::query()
-                ->visibleTo(auth()->user())
-                ->active()
-                ->whereNotNull('contact_id')
-                ->with(['company', 'contact'])
-                ->latest()
-                ->limit(500)
-                ->get(),
-            'selectedCount' => count($this->leadIds),
+            'messageTemplates' => MessageTemplate::active()->where('channel', $channel->includesEmail() ? 'EMAIL' : 'WHATSAPP')->orderBy('name')->get(),
+            'whatsappTemplates' => MessageTemplate::active()->where('channel', 'WHATSAPP')->orderBy('name')->get(),
+            'leadStatuses' => LeadStatus::cases(),
+            'sources' => LeadSource::orderBy('name')->get(),
+            'importBatches' => ImportBatch::orderByDesc('created_at')->limit(100)->get(),
+            'tags' => Tag::orderBy('name')->get(),
+            'industries' => Company::query()
+                ->whereNotNull('industry')->distinct()->orderBy('industry')->limit(200)->pluck('industry'),
+            'cities' => Company::query()
+                ->whereNotNull('city')->distinct()->orderBy('city')->limit(200)->pluck('city'),
+            'channels' => ProposalChannel::cases(),
+            'selectedCount' => count($this->manualLeadIds),
             'whatsAppEnabled' => (bool) config('proposals.whatsapp.proposal_campaign_enabled'),
         ]);
     }

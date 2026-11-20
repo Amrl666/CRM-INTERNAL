@@ -6,9 +6,13 @@ use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Models\CampaignRecipientChannel;
 use App\Domain\Campaigns\Services\BusinessSchedule;
+use App\Jobs\SendProposalChannelDeliveryJob;
 use App\Jobs\SendProposalDeliveryJob;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 final class ResumeProposalCampaignAction
 {
@@ -20,52 +24,59 @@ final class ResumeProposalCampaignAction
     public function handle(Campaign $campaign, int $userId): Campaign
     {
         return DB::transaction(function () use ($campaign, $userId): Campaign {
-            $lockedCampaign = Campaign::query()
-                ->lockForUpdate()
-                ->findOrFail($campaign->id);
+            $lockedCampaign = Campaign::query()->lockForUpdate()->findOrFail($campaign->id);
 
             if ($lockedCampaign->status !== CampaignStatus::Paused) {
-                throw new \InvalidArgumentException(
-                    'Campaign tidak sedang dijeda.'
-                );
+                throw new InvalidArgumentException('Campaign tidak sedang dijeda.');
             }
 
             if (! $lockedCampaign->isApprovedForCurrentRevision()) {
-                throw new \InvalidArgumentException(
-                    'Approval campaign tidak berlaku. Ajukan approval ulang.'
-                );
+                throw new InvalidArgumentException('Approval campaign tidak berlaku. Ajukan approval ulang.');
             }
 
-            $recipients = $lockedCampaign->recipients()
+            $query = CampaignRecipientChannel::query()
+                ->where('campaign_id', $lockedCampaign->id)
                 ->whereIn('delivery_status', [
-                    DeliveryStatus::Scheduled,
-                    DeliveryStatus::Pending,
-                    DeliveryStatus::Ready,
-                ])
-                ->orderBy('created_at')
-                ->lockForUpdate()
-                ->get();
+                    DeliveryStatus::Scheduled, DeliveryStatus::Pending, DeliveryStatus::Ready,
+                ]);
 
-            $slots = $this->schedule->plan(
-                $lockedCampaign,
-                $recipients->pluck('id')->all(),
-            );
+            $channels = (clone $query)->orderBy('created_at')->lockForUpdate()->get();
 
-            $scheduledRecipients = collect();
+            if ($channels->isEmpty()) {
+                $channels = $lockedCampaign->recipients()
+                    ->whereIn('delivery_status', [
+                        DeliveryStatus::Scheduled, DeliveryStatus::Pending, DeliveryStatus::Ready,
+                    ])
+                    ->orderBy('created_at')->lockForUpdate()->get();
+            }
 
-            foreach ($recipients as $recipient) {
-                $scheduledAt = $slots[$recipient->id] ?? null;
+            $slots = $channels instanceof Collection
+                && $channels->first() instanceof CampaignRecipientChannel
+                ? $this->schedule->planChannelRows($lockedCampaign, $channels->pluck('id')->all())
+                : $this->schedule->plan($lockedCampaign, $channels->pluck('id')->all());
 
+            foreach ($channels as $channel) {
+                $scheduledAt = $slots[(string) $channel->id] ?? null;
                 if ($scheduledAt === null) {
                     continue;
                 }
 
-                $recipient->update([
+                $channel->update([
                     'scheduled_at' => $scheduledAt,
                     'delivery_status' => DeliveryStatus::Scheduled,
                 ]);
 
-                $scheduledRecipients->push($recipient);
+                if ($channel instanceof CampaignRecipientChannel) {
+                    SendProposalChannelDeliveryJob::dispatch($channel->id)
+                        ->onQueue('communications')
+                        ->delay($scheduledAt)
+                        ->afterCommit();
+                } else {
+                    SendProposalDeliveryJob::dispatch($channel->id)
+                        ->onQueue('communications')
+                        ->delay($scheduledAt)
+                        ->afterCommit();
+                }
             }
 
             $lockedCampaign->update([
@@ -73,19 +84,11 @@ final class ResumeProposalCampaignAction
                 'paused_at' => null,
             ]);
 
-            foreach ($scheduledRecipients as $recipient) {
-                SendProposalDeliveryJob::dispatch($recipient->id)
-                    ->delay($recipient->scheduled_at)
-                    ->afterCommit();
-            }
-
             $this->audit->handle(
                 user: $userId,
                 action: 'proposal_campaign.resumed',
                 subject: $lockedCampaign,
-                after: [
-                    'rescheduled' => $scheduledRecipients->count(),
-                ],
+                after: ['rescheduled' => $channels->count()],
             );
 
             return $lockedCampaign->refresh();

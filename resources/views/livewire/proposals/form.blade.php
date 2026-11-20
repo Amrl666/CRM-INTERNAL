@@ -2,7 +2,7 @@
     <div class="flex items-center justify-between">
         <div>
             <h2 class="text-lg font-semibold text-slate-900">Buat outreach</h2>
-            <p class="mt-1 text-sm text-slate-500">Satu outreach hanya menggunakan satu channel. PDF dibuat per penerima setelah disimpan.</p>
+            <p class="mt-1 text-sm text-slate-500">Penerima ditentukan oleh filter saat campaign dimulai. PDF dibuat setelah audiens diambil.</p>
         </div>
         <a href="{{ route('proposals.index') }}" wire:navigate class="text-sm text-slate-600 hover:text-slate-900">Kembali</a>
     </div>
@@ -12,190 +12,245 @@
     @enderror
 
     @if ($errors->any())
-        <div class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
-            Periksa kembali kolom yang ditandai.
-        </div>
+        <div class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">Periksa kembali kolom yang ditandai.</div>
     @endif
 
-    <div class="flex items-center gap-2" role="group" aria-label="Wizard alur outreach">
-        <a href="#outreach-audience" class="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white">1 · Dasar &amp; Audiens</a>
-        <span class="h-0.5 w-8 bg-slate-300" aria-hidden="true"></span>
-        <a href="#outreach-schedule" class="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white">2 · Jadwal</a>
-        <span class="h-0.5 w-8 bg-slate-300" aria-hidden="true"></span>
-        <a href="#outreach-review" class="rounded-full bg-slate-300 px-3 py-1 text-xs font-medium text-slate-600">3 · Review</a>
-    </div>
+    <div class="grid gap-6 lg:grid-cols-2">
+        <div class="space-y-6">
+            <section class="rounded-lg border border-slate-200 bg-white p-5" id="outreach-audience">
+                <h3 class="font-medium text-slate-900">1 · Dasar &amp; audiens</h3>
 
-    <form wire:submit="save" class="space-y-6">
-        <div id="outreach-audience" class="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-6 space-y-4">
-            <h3 class="font-medium text-slate-900">Dasar campaign &amp; audiens</h3>
+                <div class="mt-4 space-y-4">
+                    <div>
+                        <label for="campaign-name" class="block text-sm font-medium text-slate-700">Nama campaign</label>
+                        <input id="campaign-name" type="text" wire:model="name" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                        @error('name') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+                    </div>
 
-            <div>
-                <label for="proposal-name" class="block text-sm font-medium text-slate-700">Nama campaign</label>
-                <input id="proposal-name" type="text" wire:model="name" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
-                @error('name') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-            </div>
+                    <div>
+                        <label for="proposal-template" class="block text-sm font-medium text-slate-700">Template proposal</label>
+                        <select id="proposal-template" wire:model="proposal_template_id" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                            <option value="">Pilih template</option>
+                            @foreach ($proposalTemplates as $template)
+                                <option value="{{ $template->id }}">{{ $template->name }} v{{ $template->version }}</option>
+                            @endforeach
+                        </select>
+                        @error('proposal_template_id') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+                    </div>
 
-            <div class="grid gap-4 sm:grid-cols-2">
-                <div>
-                    <label for="proposal-template" class="block text-sm font-medium text-slate-700">Template proposal</label>
-                    <select id="proposal-template" wire:model="proposal_template_id" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Pilih template</option>
-                        @foreach ($proposalTemplates as $template)
-                            <option value="{{ $template->id }}">{{ $template->name }} v{{ $template->version }}</option>
-                        @endforeach
-                    </select>
-                    @error('proposal_template_id') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
+                    <div>
+                        <label for="channel" class="block text-sm font-medium text-slate-700">Channel</label>
+                        <select id="channel" wire:model.live="channel" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                            @foreach ($channels as $item)
+                                <option value="{{ $item->value }}">{{ $item->label() }}</option>
+                            @endforeach
+                        </select>
+                        @error('channel') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+                        @if ($channel === \App\Domain\Campaigns\Enums\ProposalChannel::Both)
+                            <p class="mt-1 text-xs text-slate-500">Setiap channel dievaluasi independen. Jika hanya satu yang eligible, hanya channel itu yang dikirim.</p>
+                        @endif
+                    </div>
 
-                <div>
-                    <label for="proposal-channel" class="block text-sm font-medium text-slate-700">Channel</label>
-                    <select id="proposal-channel" wire:model.live="channel" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                        <option value="EMAIL">Email (Gmail)</option>
-                        <option value="WHATSAPP" @disabled(! $whatsAppEnabled)>WhatsApp (Evolution){{ $whatsAppEnabled ? '' : ' — belum diaktifkan' }}</option>
-                    </select>
-                    @error('channel') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
-            </div>
+                    <div>
+                        <label for="message-template" class="block text-sm font-medium text-slate-700">Template pesan {{ $channel === \App\Domain\Campaigns\Enums\ProposalChannel::WhatsApp ? 'WhatsApp' : 'Email' }}</label>
+                        <select id="message-template" wire:model="message_template_id" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                            <option value="">Pilih template</option>
+                            @foreach ($messageTemplates as $template)
+                                <option value="{{ $template->id }}">{{ $template->name }}</option>
+                            @endforeach
+                        </select>
+                        @error('message_template_id') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+                    </div>
 
-            <div>
-                <label for="message-template" class="block text-sm font-medium text-slate-700">Template pesan</label>
-                <select id="message-template" wire:model="message_template_id" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Pilih template pesan</option>
-                    @foreach ($messageTemplates as $template)
-                        <option value="{{ $template->id }}">{{ $template->name }}</option>
-                    @endforeach
-                </select>
-                @error('message_template_id') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-            </div>
-
-            <div>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="block text-sm font-medium text-slate-700">Penerima (lead aktif)</span>
-                    @if ($leads->isNotEmpty())
-                        <button type="button" wire:click="selectAllEligible" class="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                            Pilih semua dari daftar ini
-                        </button>
+                    @if ($channel === \App\Domain\Campaigns\Enums\ProposalChannel::Both)
+                        <div>
+                            <label for="whatsapp-message-template" class="block text-sm font-medium text-slate-700">Template pesan WhatsApp</label>
+                            <select id="whatsapp-message-template" wire:model="whatsapp_message_template_id" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                                <option value="">Pilih template</option>
+                                @foreach ($whatsappTemplates as $template)
+                                    <option value="{{ $template->id }}">{{ $template->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('whatsapp_message_template_id') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
+                        </div>
                     @endif
                 </div>
-                <p class="mt-1 text-sm text-slate-600">
-                    {{ $selectedCount }} penerima dipilih. Penerima tanpa consent akan dilewati saat validasi eligibility.
-                </p>
+            </section>
 
-                @if ($leads->isEmpty())
-                    <div class="mt-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                        Belum ada lead aktif dengan kontak. Tambahkan atau lengkapi data lead terlebih dahulu.
+            <section class="rounded-lg border border-slate-200 bg-white p-5">
+                <h3 class="font-medium text-slate-900">2 · Kriteria audiens</h3>
+
+                <div class="mt-4 flex gap-4 text-sm">
+                    <label class="flex items-center gap-2"><input type="radio" wire:model.live="audienceMode" value="filter" /> Filter otomatis</label>
+                    <label class="flex items-center gap-2"><input type="radio" wire:model.live="audienceMode" value="manual" /> Pilih manual</label>
+                </div>
+
+                @if ($audienceMode === 'filter')
+                    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Status lead</label>
+                            <select multiple wire:model="leadStatuses" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($leadStatuses as $status)
+                                    <option value="{{ $status->value }}">{{ $status->label() }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Sumber lead</label>
+                            <select multiple wire:model="sourceIds" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($sources as $source)
+                                    <option value="{{ $source->id }}">{{ $source->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Batch import</label>
+                            <select multiple wire:model="importBatchIds" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($importBatches as $batch)
+                                    <option value="{{ $batch->id }}">{{ $batch->filename }} ({{ $batch->created_at->format('d M Y') }})</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Tags</label>
+                            <select multiple wire:model="tagIds" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($tags as $tag)
+                                    <option value="{{ $tag->id }}">{{ $tag->name }}</option>
+                                @endforeach
+                            </select>
+                            <select wire:model="tagMatch" class="mt-2 w-full rounded-md border border-slate-300 px-2 py-1 text-xs">
+                                <option value="any">Cocok salah satu tag</option>
+                                <option value="all">Cocok semua tag</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Industri</label>
+                            <select multiple wire:model="industries" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($industries as $industry)
+                                    <option value="{{ $industry }}">{{ $industry }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Kota</label>
+                            <select multiple wire:model="cities" class="mt-1 h-28 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                @foreach ($cities as $city)
+                                    <option value="{{ $city }}">{{ $city }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Negara (ISO-2)</label>
+                            <select multiple wire:model="countryCodes" class="mt-1 h-20 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                <option value="ID">Indonesia</option>
+                                <option value="SG">Singapura</option>
+                                <option value="MY">Malaysia</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Riwayat outreach</label>
+                            <select wire:model="priorOutreach" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                <option value="any">Semua (duplikat tetap dikecualikan)</option>
+                                <option value="never_contacted">Belum pernah di-outreach</option>
+                                <option value="failed_only">Pernah gagal, belum berhasil</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">Email</label>
+                            <select wire:model="emailAvailability" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                <option value="any">Semua</option>
+                                <option value="available">Tersedia</option>
+                                <option value="unavailable">Tidak tersedia</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-600">WhatsApp</label>
+                            <select wire:model="whatsappAvailability" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">
+                                <option value="any">Semua</option>
+                                <option value="available">Tersedia</option>
+                                <option value="unavailable">Tidak tersedia</option>
+                            </select>
+                        </div>
                     </div>
                 @else
-                    <div class="mt-2 max-h-72 space-y-1 overflow-y-auto rounded-md border border-slate-300 bg-white p-2"
-                        role="group" aria-label="Pilih penerima proposal">
-                        @foreach ($leads as $lead)
-                            <label for="proposal-lead-{{ $lead->id }}"
-                                class="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 text-sm hover:bg-slate-50">
-                                <input id="proposal-lead-{{ $lead->id }}" type="checkbox" wire:model="leadIds" value="{{ $lead->id }}"
-                                    class="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"/>
-                                <span class="min-w-0">
-                                    <span class="block font-medium text-slate-800">{{ $lead->company->name }}</span>
-                                    <span class="block text-xs text-slate-500">
-                                        {{ $lead->contact->full_name }} ·
-                                        {{ $lead->contact->normalized_email ?? $lead->contact->phone_e164 ?? 'tanpa alamat' }}
-                                    </span>
-                                </span>
-                            </label>
+                    <p class="mt-4 text-sm text-slate-600">Mode manual menyimpan daftar lead yang dipilih. Maksimal 1.000 lead. Lead tetap di-resolve saat campaign dimulai.</p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        @foreach ($manualLeadIds as $leadId)
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">{{ $leadId }}</span>
                         @endforeach
                     </div>
+                    @error('manualLeadIds') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
                 @endif
 
-                <p class="mt-1 text-xs text-slate-500">Penerima tanpa consent akan dilewati saat validasi eligibility.</p>
-                @error('leadIds')
-                    <p class="mt-1 text-sm text-red-600" role="alert">{{ $message }}</p>
-                @enderror
-                @error('leadIds.*')
-                    <p class="mt-1 text-sm text-red-600" role="alert">{{ $message }}</p>
-                @enderror
-            </div>
+                <div class="mt-4">
+                    <button type="button" wire:click="calculatePreview" wire:loading.attr="disabled" class="rounded-md border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100">
+                        Hitung estimasi penerima
+                    </button>
+                </div>
+
+                @if ($audiencePreview)
+                    <div class="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
+                        <p class="font-medium text-slate-900">Estimasi — bukan snapshot final</p>
+                        <p class="mt-1 text-slate-600">{{ $audiencePreview['total_contacts'] }} kontak cocok dengan filter.</p>
+                        @foreach ($audiencePreview['channels'] as $channelName => $counts)
+                            <p class="mt-1 text-slate-600">{{ $channelName }}: {{ $counts['eligible'] }} eligible, {{ $counts['ineligible'] }} tidak eligible.</p>
+                        @endforeach
+                        <p class="mt-1 text-xs text-slate-400">Dihitung {{ $audiencePreview['calculated_at'] }}</p>
+                    </div>
+                @endif
+            </section>
         </div>
 
-        <div id="outreach-schedule" class="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-6 space-y-4">
-            <div>
-                <h3 class="font-medium text-slate-900">Jadwal bisnis</h3>
-                <p class="mt-1 text-sm text-slate-500">Waktu disimpan UTC; slot dihitung pada zona waktu yang dipilih. Pengiriman tidak dijadwalkan di luar jam kerja.</p>
-            </div>
-
-            <div class="grid gap-4 sm:grid-cols-2">
+        <section class="rounded-lg border border-slate-200 bg-white p-5" id="outreach-schedule">
+            <h3 class="font-medium text-slate-900">3 · Jadwal &amp; batas pengiriman</h3>
+            <div class="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
-                    <label for="proposal-timezone" class="block text-sm font-medium text-slate-700">Zona waktu</label>
-                    <input id="proposal-timezone" type="text" wire:model="timezone" list="timezone-options" placeholder="Asia/Jakarta"
-                        class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"/>
-                    <datalist id="timezone-options">
-                        <option value="Asia/Jakarta"></option>
-                        <option value="Asia/Makassar"></option>
-                        <option value="Asia/Jayapura"></option>
-                        <option value="Asia/Singapore"></option>
-                        <option value="UTC"></option>
-                    </datalist>
-                    @error('timezone') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
+                    <label class="block text-xs font-medium text-slate-600">Timezone</label>
+                    <input type="text" wire:model="timezone" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+                    @error('timezone') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
                 </div>
                 <div>
-                    <label for="proposal-start" class="block text-sm font-medium text-slate-700">Mulai jadwal pengiriman (opsional)</label>
-                    <input id="proposal-start" type="datetime-local" wire:model="scheduledStartAt" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    @error('scheduledStartAt') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
+                    <label class="block text-xs font-medium text-slate-600">Mulai terjadwal</label>
+                    <input type="datetime-local" wire:model="scheduledStartAt" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600">Jam mulai</label>
+                    <input type="time" wire:model="businessStart" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600">Jam selesai</label>
+                    <input type="time" wire:model="businessEnd" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600">Rate per jam</label>
+                    <input type="number" min="1" max="120" wire:model="rateLimitPerHour" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600">Jarak minimum (detik)</label>
+                    <input type="number" min="0" max="3600" wire:model="minSpacingSeconds" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm" />
                 </div>
             </div>
 
-            <div>
-                <span class="block text-sm font-medium text-slate-700">Hari aktif</span>
-                <div class="mt-2 flex flex-wrap gap-3">
-                    @foreach ([1 => 'Senin', 2 => 'Selasa', 3 => 'Rabu', 4 => 'Kamis', 5 => 'Jumat', 6 => 'Sabtu', 7 => 'Minggu'] as $day => $label)
-                        <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                            <input type="checkbox" wire:model="businessDays" value="{{ $day }}" class="rounded border-slate-300 text-blue-700 focus:ring-blue-500">
-                            {{ $label }}
-                        </label>
+            <div class="mt-4">
+                <label class="block text-xs font-medium text-slate-600">Hari kerja</label>
+                <div class="mt-1 flex flex-wrap gap-3 text-sm">
+                    @foreach ([1 => 'Sen', 2 => 'Sel', 3 => 'Rab', 4 => 'Kam', 5 => 'Jum', 6 => 'Sab', 7 => 'Min'] as $day => $label)
+                        <label class="flex items-center gap-1"><input type="checkbox" value="{{ $day }}" wire:model="businessDays" /> {{ $label }}</label>
                     @endforeach
                 </div>
-                @error('businessDays') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
             </div>
 
-            <div class="grid gap-4 sm:grid-cols-2">
-                <div>
-                    <label for="proposal-business-start" class="block text-sm font-medium text-slate-700">Jam mulai</label>
-                    <input id="proposal-business-start" type="time" wire:model="businessStart" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    @error('businessStart') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
-                <div>
-                    <label for="proposal-business-end" class="block text-sm font-medium text-slate-700">Jam selesai</label>
-                    <input id="proposal-business-end" type="time" wire:model="businessEnd" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    @error('businessEnd') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
+            <div class="mt-4">
+                <label class="block text-xs font-medium text-slate-600">Tanggal libur (satu per baris, YYYY-MM-DD)</label>
+                <textarea wire:model="excludedDates" rows="3" class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"></textarea>
+                @error('excludedDates') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
             </div>
 
-            <div>
-                <label for="proposal-excluded" class="block text-sm font-medium text-slate-700">Tanggal libur / dikecualikan</label>
-                <textarea id="proposal-excluded" rows="3" wire:model="excludedDates" placeholder="2026-12-25" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"></textarea>
-                <p class="mt-1 text-xs text-slate-500">Satu tanggal per baris, format YYYY-MM-DD.</p>
-                @error('excludedDates') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
+            <div class="mt-6 flex justify-end">
+                <button type="button" wire:click="save" wire:loading.attr="disabled" class="rounded-md bg-blue-700 px-5 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50">
+                    Simpan draft
+                </button>
             </div>
-
-            <div class="grid gap-4 sm:grid-cols-2">
-                <div>
-                    <label for="proposal-rate" class="block text-sm font-medium text-slate-700">Batas pengiriman per jam</label>
-                    <input id="proposal-rate" type="number" min="1" max="120" wire:model="rateLimitPerHour" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    @error('rateLimitPerHour') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
-                <div>
-                    <label for="proposal-spacing" class="block text-sm font-medium text-slate-700">Jarak minimum antar pengiriman (detik)</label>
-                    <input id="proposal-spacing" type="number" min="0" max="3600" wire:model="minSpacingSeconds" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"/>
-                    @error('minSpacingSeconds') <div class="mt-1 text-sm text-red-600">{{ $message }}</div> @enderror
-                </div>
-            </div>
-        </div>
-
-        <div id="outreach-review" class="flex justify-end gap-3 scroll-mt-24">
-            <a href="{{ route('proposals.index') }}" wire:navigate class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Batal</a>
-            <button type="submit" wire:loading.attr="disabled" wire:target="save" @disabled($leads->isEmpty())
-                class="rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
-                <span wire:loading.remove wire:target="save">Simpan sebagai draft</span>
-                <span wire:loading wire:target="save">Menyimpan…</span>
-            </button>
-        </div>
-    </form>
+        </section>
+    </div>
 </div>

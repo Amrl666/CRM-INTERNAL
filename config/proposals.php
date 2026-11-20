@@ -28,4 +28,11 @@ return [
     'gmail' => [
         'from_name' => env('PROPOSAL_GMAIL_FROM_NAME', env('PROPOSAL_FROM_NAME', 'Enigma Collective Studio')),
     ],
+
+    'audience' => [
+        'dynamic_enabled' => (bool) env('PROPOSAL_DYNAMIC_AUDIENCE_ENABLED', true),
+        'multichannel_enabled' => (bool) env('PROPOSAL_MULTICHANNEL_ENABLED', true),
+        'chunk_size' => (int) env('PROPOSAL_AUDIENCE_CHUNK_SIZE', 500),
+        'preview_cache_seconds' => (int) env('PROPOSAL_AUDIENCE_PREVIEW_CACHE_SECONDS', 60),
+    ],
 ];

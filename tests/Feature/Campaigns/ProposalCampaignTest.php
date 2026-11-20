@@ -5,11 +5,11 @@ use App\Domain\Campaigns\Actions\CancelProposalCampaignAction;
 use App\Domain\Campaigns\Actions\CreateProposalCampaignAction;
 use App\Domain\Campaigns\Actions\GenerateProposalDocumentAction;
 use App\Domain\Campaigns\Actions\PauseProposalCampaignAction;
-use App\Domain\Campaigns\Actions\RefreshProposalEligibilityAction;
 use App\Domain\Campaigns\Actions\RenderProposalMessageAction;
 use App\Domain\Campaigns\Actions\RequestProposalApprovalAction;
+use App\Domain\Campaigns\Actions\ResolveProposalAudienceAction;
 use App\Domain\Campaigns\Actions\ScheduleProposalCampaignAction;
-use App\Domain\Campaigns\Actions\SendProposalDeliveryAction;
+use App\Domain\Campaigns\Actions\SendProposalChannelDeliveryAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
@@ -43,8 +43,14 @@ beforeEach(function () {
     config(['proposals.pdf_renderer' => 'fake']);
     config(['proposals.whatsapp.proposal_campaign_enabled' => false]);
 
+    $this->resolveCampaign = function ($campaign): void {
+        app(ResolveProposalAudienceAction::class)->handle($campaign);
+        $campaign->refresh();
+    };
+
     $this->prepareCampaignForApproval = function ($campaign): void {
-        app(RefreshProposalEligibilityAction::class)->handle($campaign);
+        app(ResolveProposalAudienceAction::class)->handle($campaign);
+        $campaign->refresh();
 
         $campaign->recipients()
             ->where('eligibility_status', EligibilityStatus::Eligible)
@@ -95,10 +101,17 @@ it('creates a proposal campaign in draft', function () {
 
     expect($campaign->status)->toBe(CampaignStatus::Draft)
         ->and($campaign->type)->toBe('proposal')
-        ->and($campaign->recipients()->count())->toBe(1);
+        ->and($campaign->recipients()->count())->toBe(0)
+        ->and($campaign->audience_filters['mode'])->toBe('manual')
+        ->and($campaign->audience_resolved_at)->toBeNull();
+
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+
+    expect($campaign->recipients()->count())->toBe(1)
+        ->and($campaign->recipientChannels()->count())->toBe(1);
 });
 
-it('computes recipient eligibility immediately when a proposal campaign is created', function () {
+it('computes recipient eligibility at audience resolution', function () {
     $creator = User::factory()->create();
     $consented = Lead::factory()->create();
     $notConsented = Lead::factory()->create();
@@ -114,6 +127,9 @@ it('computes recipient eligibility immediately when a proposal campaign is creat
         [$consented->id, $notConsented->id],
         $creator->id,
     );
+
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+    $campaign->refresh();
 
     $recipients = $campaign->recipients()->get()->keyBy('lead_id');
 
@@ -381,8 +397,8 @@ it('renders message templates with real recipient data', function () {
     $messageTpl = MessageTemplate::where('channel', 'EMAIL')->first();
 
     $campaign = app(CreateProposalCampaignAction::class)->handle('Rt', $template, $messageTpl, ProposalChannel::Email, [$lead->id], $creator->id);
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
     $recipient = $campaign->recipients()->first();
-    app(RefreshProposalEligibilityAction::class)->handle($campaign);
 
     $result = app(RenderProposalMessageAction::class)->handle($recipient);
 
@@ -405,15 +421,15 @@ it('re-rechecks eligibility immediately before delivery send attempt', function 
     Queue::fake();
     app(ScheduleProposalCampaignAction::class)->handle($campaign);
 
-    $recipient = $campaign->recipients()->first();
+    $channelRow = $campaign->recipientChannels()->first();
     app(ConsentService::class)->record($lead->contact, ConsentChannel::Email, ConsentStatus::Revoked, 'form');
 
-    $result = app(SendProposalDeliveryAction::class)->handle($recipient);
+    $result = app(SendProposalChannelDeliveryAction::class)->handle($channelRow);
 
     expect($result->success)->toBeFalse()
         ->and($result->reason)->toBe('ineligible');
-    $recipient->refresh();
-    expect($recipient->delivery_status)->toBe(DeliveryStatus::Skipped);
+    $channelRow->refresh();
+    expect($channelRow->delivery_status)->toBe(DeliveryStatus::Skipped);
 });
 
 it('uses the outreach creator name and position for the email banner', function () {
@@ -444,8 +460,8 @@ it('uses the outreach creator name and position for the email banner', function 
     app(ApproveProposalCampaignAction::class)->handle($campaign, $approver->id);
 
     $campaign->update(['status' => CampaignStatus::Scheduled]);
-    $recipient = $campaign->recipients()->first();
-    $recipient->update([
+    $channelRow = $campaign->recipientChannels()->first();
+    $channelRow->update([
         'delivery_status' => DeliveryStatus::Scheduled,
         'scheduled_at' => now()->subMinute(),
     ]);
@@ -453,7 +469,7 @@ it('uses the outreach creator name and position for the email banner', function 
     $fakeEmailSender = new FakeProposalEmailSender;
     $this->app->instance(ProposalEmailSender::class, $fakeEmailSender);
 
-    $result = app(SendProposalDeliveryAction::class)->handle($recipient);
+    $result = app(SendProposalChannelDeliveryAction::class)->handle($channelRow);
 
     expect($result->success)->toBeTrue()
         ->and($fakeEmailSender->sent)->toHaveCount(1)
@@ -468,11 +484,13 @@ it('uses idempotency key to prevent duplicate deliveries', function () {
     $messageTpl = MessageTemplate::where('channel', 'EMAIL')->first();
 
     $campaign = app(CreateProposalCampaignAction::class)->handle('Id', $template, $messageTpl, ProposalChannel::Email, [$lead->id], $creator->id);
-    $recipient = $campaign->recipients()->first();
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+    $channelRow = $campaign->recipientChannels()->first();
 
-    $keyBefore = $recipient->idempotency_key;
+    $keyBefore = $channelRow->idempotency_key;
     expect($keyBefore)->not()->toBeNull();
-    expect(str_starts_with((string) $keyBefore, 'proposal:'))->toBeTrue();
+    expect(str_starts_with((string) $keyBefore, 'proposal:'))->toBeTrue()
+        ->and(str_ends_with((string) $keyBefore, ':EMAIL'))->toBeTrue();
 });
 
 it('updates candidate eligible count when consent granted and pdf ready', function () {
@@ -516,6 +534,9 @@ it('counts all actual deliveries in the current local hour when planning new slo
             'min_spacing_seconds' => 0,
         ],
     );
+
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+    $campaign->refresh();
 
     $recipients = $campaign->recipients()
         ->orderBy('created_at')
@@ -580,6 +601,9 @@ it('respects minimum spacing after an actual delivery attempt', function () {
         ],
     );
 
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+    $campaign->refresh();
+
     $recipients = $campaign->recipients()->orderBy('created_at')->get();
 
     $attemptedAt = CarbonImmutable::parse(
@@ -631,6 +655,9 @@ it('respects existing scheduled reservations when planning new slots', function 
             'min_spacing_seconds' => 600,
         ],
     );
+
+    app(ResolveProposalAudienceAction::class)->handle($campaign);
+    $campaign->refresh();
 
     $recipients = $campaign->recipients()->orderBy('created_at')->get();
 

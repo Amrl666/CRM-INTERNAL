@@ -16,6 +16,25 @@
         <div class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">{{ $message }}</div>
     @enderror
 
+    @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Preparing)
+        <div class="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800" role="status">
+            Audiens sedang disiapkan. Snapshot penerima dibentuk sekarang; lead baru setelah titik ini tidak akan ditambahkan.
+        </div>
+    @endif
+
+    @if ($audienceEstimate !== null)
+        <div class="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700">
+            <p class="font-medium">Estimasi audiens (bukan snapshot final)</p>
+            <p class="mt-1 text-slate-500">
+                {{ $audienceEstimate['total_contacts'] }} kontak cocok ·
+                @foreach ($audienceEstimate['channels'] as $channel => $channelCountsRow)
+                    {{ $channel }}: {{ $channelCountsRow['eligible'] }} eligible, {{ $channelCountsRow['ineligible'] }} tidak eligible{{ $loop->last ? '' : ' ·' }}
+                @endforeach
+            </p>
+            <p class="mt-1 text-xs text-slate-400">Dihitung {{ $audienceEstimate['calculated_at'] }}</p>
+        </div>
+    @endif
+
     <div class="flex flex-wrap gap-2">
         @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Draft)
             @can('update', $campaign)
@@ -51,11 +70,11 @@
 
         @if ($campaign->status === App\Domain\Campaigns\Enums\CampaignStatus::Approved)
             @can('send', App\Domain\Campaigns\Models\Campaign::class)
-                <button type="button" wire:click="schedule" wire:confirm="Jadwalkan pengiriman untuk seluruh penerima eligible?" data-testid="schedule-campaign"
-                    wire:loading.attr="disabled" wire:target="schedule"
+                <button type="button" wire:click="start" wire:confirm="Mulai campaign? Audiens akan diambil berdasarkan filter saat ini dan menjadi snapshot final." data-testid="schedule-campaign"
+                    wire:loading.attr="disabled" wire:target="start"
                     class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
-                    <span wire:loading.remove wire:target="schedule">Jadwalkan pengiriman</span>
-                    <span wire:loading wire:target="schedule">Menjadwalkan...</span>
+                    <span wire:loading.remove wire:target="start">Mulai campaign</span>
+                    <span wire:loading wire:target="start">Menyiapkan...</span>
                 </button>
             @endcan
         @endif
@@ -178,13 +197,21 @@
                 </div>
             </div>
         @else
-            <p class="mt-3 text-sm text-slate-500">Belum ada penerima eligible dengan pesan yang dirender. Eligibility dihitung otomatis saat outreach dibuat dan PDF dibuat setelahnya.</p>
+            <p class="mt-3 text-sm text-slate-500">Belum ada penerima eligible dengan pesan yang dirender. Audiens dan eligibility dihitung saat campaign dimulai, lalu PDF dibuat setelahnya.</p>
         @endif
     </div>
 
     <div class="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div class="border-b border-slate-200 px-4 py-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <h3 class="font-medium text-slate-900">Riwayat pengiriman per penerima</h3>
+            <label class="flex items-center gap-2 text-xs text-slate-600">
+                Channel
+                <select wire:model.live="channelFilter" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+                    <option value="ALL">Semua</option>
+                    <option value="EMAIL">Email</option>
+                    <option value="WHATSAPP">WhatsApp</option>
+                </select>
+            </label>
         </div>
         <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -222,16 +249,30 @@
                                 @endif
                             </td>
                             <td class="px-4 py-3">
-                                <x-badge :status="strtoupper($recipient->delivery_status->value)" :label="$recipient->delivery_status->label()" />
-                                @if ($recipient->attempts > 0)
-                                    <p class="mt-1 text-xs text-slate-500">{{ $recipient->attempts }} percobaan</p>
-                                @endif
+                                @forelse ($recipient->channels as $channelRow)
+                                    <div class="mb-1 flex flex-wrap items-center gap-2">
+                                        <span class="w-20 text-xs font-medium text-slate-500">{{ $channelRow->channel }}</span>
+                                        <x-badge :status="strtoupper($channelRow->delivery_status->value)" :label="$channelRow->delivery_status->label()" />
+                                        @if ($channelRow->attempts > 0)
+                                            <span class="text-xs text-slate-500">{{ $channelRow->attempts }}x</span>
+                                        @endif
+                                    </div>
+                                @empty
+                                    <x-badge :status="strtoupper($recipient->delivery_status->value)" :label="$recipient->delivery_status->label()" />
+                                @endforelse
                             </td>
                             <td class="px-4 py-3 text-xs text-slate-600">
-                                {{ $recipient->scheduled_at ? $recipient->scheduled_at->timezone($campaign->timezone)->translatedFormat('d M Y H:i') : '—' }}
+                                @forelse ($recipient->channels as $channelRow)
+                                    <div>{{ $channelRow->channel }}: {{ $channelRow->scheduled_at ? $channelRow->scheduled_at->timezone($campaign->timezone)->translatedFormat('d M Y H:i') : '—' }}</div>
+                                @empty
+                                    {{ $recipient->scheduled_at ? $recipient->scheduled_at->timezone($campaign->timezone)->translatedFormat('d M Y H:i') : '—' }}
+                                @endforelse
                             </td>
                             <td class="px-4 py-3 text-xs text-slate-500">
-                                {{ $recipient->last_error ?? $recipient->skip_reason ?? $recipient->provider_message_id ?? '—' }}
+                                @php
+                                    $channelError = $recipient->channels->first(fn ($row) => $row->last_error || $row->skip_reason);
+                                @endphp
+                                {{ $channelError?->last_error ?? $channelError?->skip_reason ?? $recipient->last_error ?? $recipient->skip_reason ?? '—' }}
                             </td>
                         </tr>
                     @empty

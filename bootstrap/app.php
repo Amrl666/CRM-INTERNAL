@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\BackfillCampaignRecipientChannelsCommand;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,6 +13,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        BackfillCampaignRecipientChannelsCommand::class,
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(
             at: '127.0.0.1',

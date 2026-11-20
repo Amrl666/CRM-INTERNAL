@@ -16,11 +16,12 @@ enum DeliveryStatus: string
     case Failed = 'FAILED';
     case Skipped = 'SKIPPED';
     case Cancelled = 'CANCELLED';
+    case Partial = 'PARTIAL';
 
     /** @return string[] */
     public static function terminal(): array
     {
-        return [self::Sent->value, self::Accepted->value, self::Delivered->value, self::Failed->value, self::Skipped->value, self::Cancelled->value, self::Unknown->value];
+        return [self::Sent->value, self::Accepted->value, self::Delivered->value, self::Failed->value, self::Skipped->value, self::Cancelled->value, self::Unknown->value, self::Partial->value];
     }
 
     public function isTerminal(): bool
@@ -43,6 +44,7 @@ enum DeliveryStatus: string
             self::Failed => 'Gagal',
             self::Skipped => 'Dilewati',
             self::Cancelled => 'Dibatalkan',
+            self::Partial => 'Sebagian terkirim',
         };
     }
 }

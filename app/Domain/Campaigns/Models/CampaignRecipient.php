@@ -57,6 +57,17 @@ class CampaignRecipient extends Model
         return $this->hasMany(ProposalDeliveryAttempt::class);
     }
 
+    /** @return HasMany<CampaignRecipientChannel, $this> */
+    public function channels(): HasMany
+    {
+        return $this->hasMany(CampaignRecipientChannel::class, 'campaign_recipient_id');
+    }
+
+    public function channelFor(string $channel): ?CampaignRecipientChannel
+    {
+        return $this->channels->firstWhere('channel', $channel);
+    }
+
     public function isCancelled(): bool
     {
         return $this->delivery_status === DeliveryStatus::Cancelled;

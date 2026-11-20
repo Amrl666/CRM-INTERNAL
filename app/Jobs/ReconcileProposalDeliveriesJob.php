@@ -4,8 +4,9 @@ namespace App\Jobs;
 
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
+use App\Domain\Campaigns\Enums\PdfStatus;
 use App\Domain\Campaigns\Models\Campaign;
-use App\Domain\Campaigns\Models\CampaignRecipient;
+use App\Domain\Campaigns\Models\CampaignRecipientChannel;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
@@ -22,7 +23,7 @@ class ReconcileProposalDeliveriesJob implements ShouldQueue
 
     public function handle(): void
     {
-        CampaignRecipient::query()
+        CampaignRecipientChannel::query()
             ->where('delivery_status', DeliveryStatus::Processing)
             ->where('updated_at', '<', now()->subMinutes(10))
             ->update([
@@ -33,14 +34,41 @@ class ReconcileProposalDeliveriesJob implements ShouldQueue
             ]);
 
         Campaign::query()
-            ->whereIn('status', [CampaignStatus::Running, CampaignStatus::Scheduled])
+            ->whereIn('status', [
+                CampaignStatus::Running,
+                CampaignStatus::Scheduled,
+                CampaignStatus::Preparing,
+            ])
             ->each(function (Campaign $campaign): void {
-                $remaining = $campaign->recipients()
-                    ->whereNotIn('delivery_status', DeliveryStatus::terminal())
-                    ->count();
+                if ($campaign->status === CampaignStatus::Preparing) {
+                    if (
+                        $campaign->audience_resolved_at !== null
+                        && $campaign->recipients()
+                            ->whereIn('pdf_status', [PdfStatus::Pending, PdfStatus::Generating])
+                            ->doesntExist()
+                    ) {
+                        FinalizeProposalCampaignPreparationJob::dispatch($campaign->id)
+                            ->onQueue('campaigns');
+                    }
+
+                    return;
+                }
+
+                $hasChannelRows = $campaign->recipientChannels()->exists();
+
+                $remaining = $hasChannelRows
+                    ? $campaign->recipientChannels()
+                        ->whereNotIn('delivery_status', DeliveryStatus::terminal())
+                        ->count()
+                    : $campaign->recipients()
+                        ->whereNotIn('delivery_status', DeliveryStatus::terminal())
+                        ->count();
 
                 if ($remaining === 0) {
-                    $campaign->update(['status' => CampaignStatus::Completed, 'completed_at' => now()]);
+                    $campaign->update([
+                        'status' => CampaignStatus::Completed,
+                        'completed_at' => now(),
+                    ]);
                 }
             });
     }

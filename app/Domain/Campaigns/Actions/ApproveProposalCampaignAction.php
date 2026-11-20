@@ -5,12 +5,16 @@ namespace App\Domain\Campaigns\Actions;
 use App\Domain\Audit\Actions\RecordAuditAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Services\AudiencePreview;
 use App\Domain\Campaigns\Services\ProposalApprovalSnapshot;
+use App\Domain\Campaigns\Support\AudienceFilter;
 use App\Models\User;
+use InvalidArgumentException;
 
 final class ApproveProposalCampaignAction
 {
     public function __construct(
+        private readonly AudiencePreview $preview,
         private readonly ProposalApprovalSnapshot $snapshot,
         private readonly RecordAuditAction $audit,
     ) {}
@@ -18,17 +22,22 @@ final class ApproveProposalCampaignAction
     public function handle(Campaign $campaign, int $approvedBy): Campaign
     {
         if ($campaign->status !== CampaignStatus::Review) {
-            throw new \InvalidArgumentException('Campaign harus berstatus review sebelum disetujui.');
+            throw new InvalidArgumentException('Campaign harus berstatus review sebelum disetujui.');
         }
 
         $approver = User::query()->findOrFail($approvedBy);
 
-        if ($campaign->created_by === $approvedBy && ! $approver->hasRole('super_admin')
-        ) {
-            throw new \InvalidArgumentException('Pembuat campaign tidak boleh menyetujui campaign sendiri.');
+        if ($campaign->created_by === $approvedBy && ! $approver->hasRole('super_admin')) {
+            throw new InvalidArgumentException('Pembuat campaign tidak boleh menyetujui campaign sendiri.');
         }
 
-        $snapshot = $this->snapshot->build($campaign);
+        $summary = $this->preview->estimate(
+            $campaign,
+            AudienceFilter::fromArray($campaign->audience_filters ?? []),
+            fresh: true,
+        );
+
+        $snapshot = $this->snapshot->build($campaign, $summary);
 
         $campaign->update([
             'status' => CampaignStatus::Approved,
@@ -40,7 +49,10 @@ final class ApproveProposalCampaignAction
 
         $this->audit->handle(user: $approvedBy, action: 'proposal_campaign.approved', subject: $campaign, after: [
             'revision' => $campaign->revision,
-            'recipients' => count($snapshot['recipients']),
+            'estimated_recipients' => array_sum(array_map(
+                static fn (array $counts): int => $counts['eligible'],
+                $summary['channels'],
+            )),
             'channel' => $campaign->channel?->value,
         ]);
 

@@ -5,15 +5,16 @@ namespace App\Livewire\Proposals;
 use App\Domain\Campaigns\Actions\ApproveProposalCampaignAction;
 use App\Domain\Campaigns\Actions\CancelProposalCampaignAction;
 use App\Domain\Campaigns\Actions\PauseProposalCampaignAction;
+use App\Domain\Campaigns\Actions\PrepareProposalCampaignAction;
 use App\Domain\Campaigns\Actions\RequestProposalApprovalAction;
 use App\Domain\Campaigns\Actions\ResumeProposalCampaignAction;
-use App\Domain\Campaigns\Actions\ScheduleProposalCampaignAction;
 use App\Domain\Campaigns\Enums\CampaignStatus;
 use App\Domain\Campaigns\Enums\DeliveryStatus;
 use App\Domain\Campaigns\Enums\EligibilityStatus;
 use App\Domain\Campaigns\Enums\PdfStatus;
-use App\Domain\Campaigns\Enums\ProposalChannel;
 use App\Domain\Campaigns\Models\Campaign;
+use App\Domain\Campaigns\Services\AudiencePreview;
+use App\Domain\Campaigns\Support\AudienceFilter;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -28,6 +29,8 @@ class Show extends Component
     public Campaign $campaign;
 
     public string $cancelReason = '';
+
+    public string $channelFilter = 'ALL';
 
     public function mount(Campaign $campaign): void
     {
@@ -68,14 +71,13 @@ class Show extends Component
         };
 
         $this->run($start, 'Campaign berhasil diajukan untuk review dan disetujui.');
-
         $this->campaign->refresh();
     }
 
-    public function schedule(ScheduleProposalCampaignAction $action): void
+    public function start(PrepareProposalCampaignAction $action): void
     {
         $this->authorize('send', Campaign::class);
-        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Pengiriman berhasil dijadwalkan.');
+        $this->run(fn () => $action->handle($this->campaign, (int) auth()->id()), 'Audiens sedang disiapkan.');
     }
 
     public function pause(PauseProposalCampaignAction $action): void
@@ -105,49 +107,70 @@ class Show extends Component
         }
     }
 
-    public function render()
+    public function render(AudiencePreview $preview)
     {
-        $recipients = $this->campaign->recipients()
-            ->with(['contact.company', 'lead'])
-            ->orderBy('created_at')
-            ->paginate(25);
+        $recipientsQuery = $this->campaign->recipients()
+            ->with(['channels', 'contact.company', 'lead']);
 
-        $previewQuery = $this->campaign->recipients()
-            ->where('eligibility_status', EligibilityStatus::Eligible);
-
-        if ($this->campaign->channel === ProposalChannel::WhatsApp) {
-            $previewQuery
-                ->whereNotNull('rendered_whatsapp')
-                ->where('rendered_whatsapp', '<>', '');
-        } else {
-            $previewQuery->whereNotNull('rendered_subject');
+        if ($this->channelFilter !== 'ALL') {
+            $recipientsQuery->whereHas('channels', fn ($q) => $q->where('channel', $this->channelFilter));
         }
 
-        $preview = $previewQuery->first();
+        $recipients = $recipientsQuery->orderBy('created_at')->paginate(25);
+
+        $previewRecipient = null;
+        $previewChannel = $this->campaign->channel?->includesWhatsApp() ? 'WHATSAPP' : 'EMAIL';
+
+        if ($this->campaign->recipientChannels()->exists()) {
+            $previewRecipient = $this->campaign->recipients()
+                ->where('eligibility_status', EligibilityStatus::Eligible)
+                ->whereHas('channels', function ($q) use ($previewChannel): void {
+                    $q->where('channel', $previewChannel)
+                        ->where('eligibility_status', EligibilityStatus::Eligible->value);
+                })
+                ->first();
+        }
+
+        $audienceEstimate = null;
+        if (in_array($this->campaign->status, [CampaignStatus::Draft, CampaignStatus::Review, CampaignStatus::Approved], true)) {
+            $audienceEstimate = $preview->estimate(
+                $this->campaign,
+                AudienceFilter::fromArray($this->campaign->audience_filters ?? []),
+            );
+        }
+
+        $eligibilityReasons = $this->campaign->recipientChannels()
+            ->where('eligibility_status', EligibilityStatus::Ineligible->value)
+            ->selectRaw('channel, eligibility_reason, count(*) as total')
+            ->groupBy('channel', 'eligibility_reason')
+            ->get()
+            ->mapWithKeys(fn ($row) => [$row->channel.': '.$row->eligibility_reason => (int) $row->total]);
 
         return view('livewire.proposals.show', [
             'recipients' => $recipients,
-            'preview' => $preview,
+            'preview' => $previewRecipient,
+            'previewChannel' => $previewChannel,
             'counts' => $this->campaign->deliveryCounts(),
-            'eligibleCount' => $this->campaign->recipients()->where('eligibility_status', EligibilityStatus::Eligible)->count(),
-            'ineligibleCount' => $this->campaign->recipients()->where('eligibility_status', EligibilityStatus::Ineligible)->count(),
+            'channelCounts' => $this->campaign->channelDeliveryCounts(),
+            'audienceEstimate' => $audienceEstimate,
+            'eligibleCount' => $this->campaign->recipientChannels()
+                ->where('eligibility_status', EligibilityStatus::Eligible->value)->count(),
+            'ineligibleCount' => $this->campaign->recipientChannels()
+                ->where('eligibility_status', EligibilityStatus::Ineligible->value)->count(),
             'pdfReady' => $this->campaign->recipients()->where('pdf_status', PdfStatus::Ready)->count(),
             'pdfFailed' => $this->campaign->recipients()->where('pdf_status', PdfStatus::Failed)->count(),
-            'pdfPending' => $this->campaign->recipients()->whereIn('pdf_status', [PdfStatus::Pending, PdfStatus::Generating])->count(),
-            'eligibilityReasons' => $this->campaign->recipients()
-                ->where('eligibility_status', EligibilityStatus::Ineligible)
-                ->selectRaw('eligibility_reason, count(*) as total')
-                ->groupBy('eligibility_reason')
-                ->pluck('total', 'eligibility_reason'),
-            'nextDelivery' => $this->campaign->recipients()
+            'pdfPending' => $this->campaign->recipients()
+                ->whereIn('pdf_status', [PdfStatus::Pending, PdfStatus::Generating])->count(),
+            'eligibilityReasons' => $eligibilityReasons,
+            'nextDelivery' => $this->campaign->recipientChannels()
                 ->whereNotNull('scheduled_at')
                 ->where('scheduled_at', '>=', now())
                 ->whereNotIn('delivery_status', DeliveryStatus::terminal())
                 ->min('scheduled_at'),
             'isCreator' => $this->campaign->created_by === auth()->id(),
             'polling' => in_array($this->campaign->status, [
-                CampaignStatus::Scheduled, CampaignStatus::Running,
-                CampaignStatus::Draft, CampaignStatus::Review,
+                CampaignStatus::Preparing, CampaignStatus::Scheduled,
+                CampaignStatus::Running, CampaignStatus::Draft, CampaignStatus::Review,
             ], true),
         ]);
     }

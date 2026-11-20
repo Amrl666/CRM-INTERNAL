@@ -13,6 +13,7 @@ enum CampaignStatus: string
     case Cancelled = 'cancelled';
 
     // Proposal outreach campaign flow (§6.8).
+    case Preparing = 'preparing';
     case Review = 'review';
     case Scheduled = 'scheduled';
     case Running = 'running';
@@ -28,6 +29,7 @@ enum CampaignStatus: string
             self::Sending => 'Mengirim',
             self::Completed => 'Selesai',
             self::Cancelled => 'Dibatalkan',
+            self::Preparing => 'Menyiapkan audiens',
             self::Review => 'Review',
             self::Scheduled => 'Terjadwal',
             self::Running => 'Berjalan',

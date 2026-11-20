@@ -28,6 +28,40 @@ final class SuppressionService
             ->exists();
     }
 
+    /**
+     * Batch version of isSuppressed(). Returns the set of suppressed
+     * normalized addresses for the given channel.
+     *
+     * @param  string[]  $addresses
+     * @return array<string, true>
+     */
+    public function suppressedAddresses(Channel $channel, array $addresses): array
+    {
+        $normalized = [];
+        foreach ($addresses as $address) {
+            if ($address === null || trim((string) $address) === '') {
+                continue;
+            }
+            $normalized[$this->normalize($channel, (string) $address)] = true;
+        }
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        $rows = SuppressionEntry::query()
+            ->where('channel', $channel)
+            ->whereIn('normalized_address', array_keys($normalized))
+            ->pluck('normalized_address');
+
+        $result = [];
+        foreach ($rows as $row) {
+            $result[(string) $row] = true;
+        }
+
+        return $result;
+    }
+
     public function normalize(Channel $channel, string $address): string
     {
         return match ($channel) {

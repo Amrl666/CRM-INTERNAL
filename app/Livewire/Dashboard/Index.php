@@ -4,6 +4,7 @@ namespace App\Livewire\Dashboard;
 
 use App\Domain\Campaigns\Models\Campaign;
 use App\Domain\Campaigns\Models\CampaignRecipient;
+use App\Domain\Campaigns\Models\CampaignRecipientChannel;
 use App\Domain\Deals\Models\Deal;
 use App\Domain\Leads\Models\Lead;
 use App\Domain\Tasks\Models\Task;
@@ -71,17 +72,21 @@ class Index extends Component
 
         $this->outreachActiveCampaigns = Campaign::query()
             ->where('type', 'proposal')
-            ->whereIn('status', ['scheduled', 'running'])
+            ->whereIn('status', ['preparing', 'scheduled', 'running'])
             ->count();
-        $this->outreachScheduled = CampaignRecipient::query()
-            ->where('delivery_status', 'SCHEDULED')
-            ->count();
-        $this->outreachSent = CampaignRecipient::query()
-            ->whereIn('delivery_status', ['SENT', 'ACCEPTED', 'DELIVERED'])
-            ->count();
-        $this->outreachFailed = CampaignRecipient::query()
-            ->where('delivery_status', 'FAILED')
-            ->count();
+
+        $channelSource = CampaignRecipientChannel::query();
+        $hasChannelRows = (clone $channelSource)->exists();
+
+        if ($hasChannelRows) {
+            $this->outreachScheduled = (clone $channelSource)->where('delivery_status', 'SCHEDULED')->count();
+            $this->outreachSent = (clone $channelSource)->whereIn('delivery_status', ['SENT', 'ACCEPTED', 'DELIVERED'])->count();
+            $this->outreachFailed = (clone $channelSource)->where('delivery_status', 'FAILED')->count();
+        } else {
+            $this->outreachScheduled = CampaignRecipient::query()->where('delivery_status', 'SCHEDULED')->count();
+            $this->outreachSent = CampaignRecipient::query()->whereIn('delivery_status', ['SENT', 'ACCEPTED', 'DELIVERED'])->count();
+            $this->outreachFailed = CampaignRecipient::query()->where('delivery_status', 'FAILED')->count();
+        }
     }
 
     public function render()

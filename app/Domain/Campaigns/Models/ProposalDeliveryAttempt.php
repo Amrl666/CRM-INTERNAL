@@ -27,4 +27,10 @@ class ProposalDeliveryAttempt extends Model
     {
         return $this->belongsTo(CampaignRecipient::class, 'campaign_recipient_id');
     }
+
+    /** @return BelongsTo<CampaignRecipientChannel, $this> */
+    public function recipientChannel(): BelongsTo
+    {
+        return $this->belongsTo(CampaignRecipientChannel::class, 'campaign_recipient_channel_id');
+    }
 }

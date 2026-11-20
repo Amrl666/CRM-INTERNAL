@@ -30,6 +30,8 @@ final class CommunicationEligibility
 
         if ($address === null || $address === '') {
             $reasons[] = $channel === Channel::Email ? 'Kontak tidak punya email.' : 'Kontak tidak punya nomor WhatsApp.';
+        } elseif ($channel === Channel::Email && filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+            $reasons[] = 'Format email tidak valid.';
         }
 
         if ($this->consent->currentStatus($contact, $channel) !== ConsentStatus::Granted) {
