@@ -2,14 +2,15 @@
     <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold text-slate-900">Template</h2>
         <div class="flex gap-2">
-            <button type="button" wire:click="$set('tab','message')" class="px-3 py-1.5 text-sm rounded-md {{ $tab === 'message' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-700' }}">Pesan</button>
             <button type="button" wire:click="$set('tab','email')" class="px-3 py-1.5 text-sm rounded-md {{ $tab === 'email' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-700' }}">Email Draft</button>
+            <button type="button" wire:click="$set('tab','message')" class="px-3 py-1.5 text-sm rounded-md {{ $tab === 'message' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-700' }}">Pesan</button>
         </div>
     </div>
 
     @if ($tab === 'message')
         <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-4">
             <h3 class="font-medium text-slate-900">{{ $editingMessageId ? 'Edit Template Pesan' : 'Buat Template Pesan' }}</h3>
+            <p class="text-xs text-slate-500">Tab ini untuk template pesan outreach. Footer banner email draft ada di tab Email Draft.</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-medium text-slate-700 mb-1">Nama</label>
@@ -126,7 +127,7 @@
                 <label class="block text-sm font-medium text-slate-700 mb-1">Body</label>
                 <textarea wire:model="emailBody" rows="6" class="w-full rounded-md border-slate-300 text-sm font-mono"></textarea>
                 @error('emailBody') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
-                <p class="mt-1 text-xs text-slate-500">Preview menampilkan email lengkap termasuk footer banner dan tanda tangan pengirim.</p>
+                <p class="mt-1 text-xs text-slate-500">Preview menampilkan email lengkap termasuk footer banner; nama dan jabatan pengirim tertanam di dalam gambar banner.</p>
             </div>
             <div class="flex gap-2">
                 <button type="button" wire:click="saveEmail" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Simpan</button>
@@ -148,6 +149,19 @@
                         <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Body</p>
                         <div class="mt-1 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-800">{!! $previewBody !!}</div>
                     </div>
+                    @if ($previewBannerUrl !== '')
+                        <div>
+                            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Footer banner</p>
+                            <div class="mt-1 rounded-md border border-slate-200 bg-white p-3">
+                                <img src="{{ $previewBannerUrl }}" wire:key="email-template-preview-banner"
+                                    alt="Footer banner email" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+                            </div>
+                        </div>
+                    @else
+                        <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+                            Banner email gagal dibuat. Pastikan file banner tersedia di <code>public/images/email-footer-banner.jpg</code>.
+                        </div>
+                    @endif
                     @if ($previewUnknownVariables !== [])
                         <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                             Perhatian: variabel berikut tidak dikenal dan akan tetap tertulis apa adanya di template: {{ implode(', ', $previewUnknownVariables) }}.

@@ -293,17 +293,22 @@ class Show extends Component
         }
     }
 
-    public function getComposePreviewHtmlProperty(): string
+    public function getComposeBannerUrlProperty(): string
     {
         $user = auth()->user();
 
+        return app(EmailBannerRenderer::class)->url($user?->name, $user?->position);
+    }
+
+    public function getComposePreviewHtmlProperty(): string
+    {
         return app(EmailMessageRenderer::class)->preview(
             new EmailMessageData(
                 to: (string) ($this->lead->contact?->normalized_email ?? ''),
                 subject: $this->emailSubject,
                 body: $this->emailBody,
             ),
-            app(EmailBannerRenderer::class)->dataUri($user?->name, $user?->position),
+            '',
         );
     }
 
@@ -312,19 +317,41 @@ class Show extends Component
         $this->previewMessageId = $this->previewMessageId === $id ? null : $id;
     }
 
-    public function getDraftPreviewHtmlProperty(): string
+    private function previewDraftMessage(): ?CommunicationMessage
     {
         if ($this->previewMessageId === null || $this->lead->contact === null) {
-            return '';
+            return null;
         }
 
         $message = CommunicationMessage::find($this->previewMessageId);
 
         if ($message === null || $message->contact_id !== $this->lead->contact->id) {
+            return null;
+        }
+
+        return $message;
+    }
+
+    public function getDraftBannerUrlProperty(): string
+    {
+        $message = $this->previewDraftMessage();
+
+        if ($message === null) {
             return '';
         }
 
         $sender = User::find($message->sent_by);
+
+        return app(EmailBannerRenderer::class)->url($sender?->name, $sender?->position);
+    }
+
+    public function getDraftPreviewHtmlProperty(): string
+    {
+        $message = $this->previewDraftMessage();
+
+        if ($message === null) {
+            return '';
+        }
 
         return app(EmailMessageRenderer::class)->preview(
             new EmailMessageData(
@@ -332,7 +359,7 @@ class Show extends Component
                 subject: (string) $message->subject,
                 body: (string) $message->body,
             ),
-            app(EmailBannerRenderer::class)->dataUri($sender?->name, $sender?->position),
+            '',
         );
     }
 

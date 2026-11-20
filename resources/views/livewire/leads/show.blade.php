@@ -200,6 +200,15 @@
                                 <div class="max-h-72 overflow-auto rounded-md border border-slate-200 bg-white p-3 text-sm">
                                     {!! $this->composePreviewHtml !!}
                                 </div>
+                                @if ($this->composeBannerUrl !== '')
+                                    <div class="mt-2">
+                                        <p class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Footer banner</p>
+                                        <div class="rounded-md border border-slate-200 bg-white p-2">
+                                            <img src="{{ $this->composeBannerUrl }}" wire:key="lead-compose-preview-banner"
+                                                alt="Footer banner email" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+                                        </div>
+                                    </div>
+                                @endif
                                 <p class="mt-2 text-xs text-slate-500">
                                     Tampilan ini mengikuti isi pesan dan footer banner yang akan dibuat di Gmail.
                                 </p>
@@ -281,6 +290,15 @@
                                         <div class="mt-2 rounded-md border border-slate-200 bg-white p-3 text-sm">
                                             {!! $this->draftPreviewHtml !!}
                                         </div>
+                                        @if ($this->draftBannerUrl !== '')
+                                            <div class="mt-2">
+                                                <p class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Footer banner</p>
+                                                <div class="rounded-md border border-slate-200 bg-white p-2">
+                                                    <img src="{{ $this->draftBannerUrl }}" wire:key="lead-draft-preview-banner-{{ $message->id }}"
+                                                        alt="Footer banner email" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+                                                </div>
+                                            </div>
+                                        @endif
                                     @endif
                                 </div>
                             @endforeach
